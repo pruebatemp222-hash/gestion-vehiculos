@@ -12,7 +12,6 @@ st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_ico
 # --- CSS para Diseño Móvil de Alta Gama ---
 st.markdown("""
     <style>
-    /* Botones principales grandes */
     div.stButton > button {
         width: 100% !important;
         height: 55px !important;
@@ -23,10 +22,7 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         transition: 0.3s;
     }
-    div.stButton > button:active {
-        transform: scale(0.95);
-    }
-    /* Estilo de las pestañas */
+    div.stButton > button:active { transform: scale(0.95); }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
@@ -39,26 +35,36 @@ st.markdown("""
 
 st.title("🅿️ Control de Parqueo")
 
-# --- 2. Conexión a Base de Datos ---
+# --- 2. Conexión a Base de Datos (Con Historial Automático) ---
 @st.cache_resource
 def conectar_sheets():
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
     creds = Credentials.from_service_account_info(creds_dict)
     cliente = gspread.authorize(creds.with_scopes(["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]))
-    return cliente.open("Vehiculos_App").sheet1
+    
+    archivo = cliente.open("Vehiculos_App")
+    hoja_principal = archivo.sheet1
+    
+    # Magia: Busca la pestaña "Historial". Si no existe, la crea automáticamente.
+    try:
+        hoja_hist = archivo.worksheet("Historial")
+    except gspread.exceptions.WorksheetNotFound:
+        hoja_hist = archivo.add_worksheet(title="Historial", rows="1000", cols="6")
+        hoja_hist.append_row(["Fecha", "Placa", "Propietario", "Hora de Ingreso", "Hora de Salida", "Pago"])
+        
+    return hoja_principal, hoja_hist
 
 try:
-    hoja_datos = conectar_sheets()
+    hoja_datos, hoja_historial = conectar_sheets()
 except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
 
-# Obtener datos y asegurar que existan las columnas base
+# Obtener datos de vehículos activos
 datos = hoja_datos.get_all_records()
 if datos:
     df = pd.DataFrame(datos)
-    # Rellenamos celdas vacías para que no haya errores
     for col in ["Hora de Ingreso", "Hora de Salida", "Pago"]:
         if col not in df.columns:
             df[col] = ""
@@ -66,55 +72,48 @@ if datos:
 else:
     df = pd.DataFrame()
 
-# --- 3. Interfaz de Usuario (Pestañas Móviles) ---
-tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Asistencia y Cobro", "⚙️ Gestión Vehículos", "📋 Ver Todo"])
+# --- 3. Interfaz de Usuario ---
+tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "📅 Historial"])
 
 # ==========================================
-# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS (EL DASHBOARD)
+# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS 
 # ==========================================
 with tab_control:
-    st.subheader("Control de Vehículos en Vivo")
+    st.subheader("Control en Vivo")
     
     if not df.empty:
-        # Selector de Vehículo
         lista_placas = df["Placa"].astype(str).tolist()
-        placa_sel = st.selectbox("🔍 Selecciona un Vehículo para operar:", lista_placas)
+        placa_sel = st.selectbox("🔍 Selecciona un Vehículo:", lista_placas)
         
-        # Obtener los datos específicos del vehículo seleccionado
         vehiculo = df[df["Placa"].astype(str) == placa_sel].iloc[0]
         fila_idx = df.index[df['Placa'].astype(str) == placa_sel].tolist()[0] + 2
         
-        # Tarjeta de Información Visual
         st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel}")
         
-        # Métricas del estado actual
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Hora Ingreso", vehiculo["Hora de Ingreso"] if vehiculo["Hora de Ingreso"] else "--:--")
-        col_m2.metric("Hora Salida", vehiculo["Hora de Salida"] if vehiculo["Hora de Salida"] else "--:--")
-        col_m3.metric("Estado Pago", vehiculo["Pago"] if vehiculo["Pago"] else "Pendiente 🔴")
+        col_m1.metric("Ingreso", vehiculo["Hora de Ingreso"] if vehiculo["Hora de Ingreso"] else "--:--")
+        col_m2.metric("Salida", vehiculo["Hora de Salida"] if vehiculo["Hora de Salida"] else "--:--")
+        col_m3.metric("Pago", vehiculo["Pago"] if vehiculo["Pago"] else "Pendiente 🔴")
         
         st.write("---")
-        st.write("👉 **Acciones Rápidas**")
         
-        # Botones de Acción
-        col1, col2, col3 = st.columns(3)
-        
-        # --- CONFIGURACIÓN DE HORA LOCAL ---
-        # Si estás en otro país, puedes cambiar 'America/Lima' por 'America/Bogota', 'America/Mexico_City', etc.
+        # Configuración de Hora Local
         zona_horaria = pytz.timezone('America/Lima') 
         hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
+        
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             if st.button("🟢 Ingreso", use_container_width=True):
                 hoja_datos.update_cell(fila_idx, 4, hora_actual)
-                st.success(f"Ingreso marcado a las {hora_actual}")
-                time.sleep(1) # Pausa para que Google Sheets guarde
+                st.success(f"Ingreso: {hora_actual}")
+                time.sleep(1)
                 st.rerun()
                 
         with col2:
             if st.button("🔴 Salida", use_container_width=True):
                 hoja_datos.update_cell(fila_idx, 5, hora_actual)
-                st.success(f"Salida marcada a las {hora_actual}")
+                st.success(f"Salida: {hora_actual}")
                 time.sleep(1)
                 st.rerun()
                 
@@ -125,17 +124,33 @@ with tab_control:
                 time.sleep(1)
                 st.rerun()
                 
-        # Botón para limpiar el estado al final del día
-        if st.button("🔄 Limpiar Asistencia (Nuevo Día)"):
+        st.write("---")
+        # --- NUEVO SISTEMA DE ARCHIVADO ---
+        if st.button("📦 Archivar en Historial y Cerrar Día"):
+            # 1. Obtener la fecha de hoy
+            fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
+            
+            # 2. Guardar todos los datos en la pestaña "Historial"
+            hoja_historial.append_row([
+                fecha_actual, 
+                placa_sel, 
+                vehiculo['Propietario'], 
+                vehiculo['Hora de Ingreso'], 
+                vehiculo['Hora de Salida'], 
+                vehiculo['Pago']
+            ])
+            
+            # 3. Limpiar el panel de control para que mañana empiece en blanco
             hoja_datos.update_cell(fila_idx, 4, "")
             hoja_datos.update_cell(fila_idx, 5, "")
             hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
-            st.success("¡Datos limpiados para un nuevo día!")
-            time.sleep(1)
+            
+            st.success(f"✅ ¡Datos de {placa_sel} guardados en el historial!")
+            time.sleep(1.5)
             st.rerun()
 
     else:
-        st.warning("No hay vehículos. Ve a 'Gestión Vehículos' para agregar uno.")
+        st.warning("Agrega un vehículo en la pestaña 'Gestión'.")
 
 # ==========================================
 # PESTAÑA 2: GESTIÓN (AGREGAR / ELIMINAR)
@@ -170,13 +185,17 @@ with tab_gestion:
             st.rerun()
 
 # ==========================================
-# PESTAÑA 3: HISTORIAL / PREVISUALIZAR BASE
+# PESTAÑA 3: HISTORIAL (BASE DE DATOS DE DÍAS)
 # ==========================================
 with tab_historial:
-    st.subheader("Previsualización Global 📋")
-    if not df.empty:
-        # Filtramos un poco los datos para que se vea más limpio en el celular
-        df_mostrar = df[["Placa", "Propietario", "Hora de Ingreso", "Hora de Salida", "Pago"]]
-        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+    st.subheader("📅 Historial de Días Anteriores")
+    
+    # Traemos los datos de la nueva hoja de Historial
+    datos_historial = hoja_historial.get_all_records()
+    
+    if datos_historial:
+        df_hist = pd.DataFrame(datos_historial)
+        # Mostramos la tabla. Estará organizada por Fecha, Placa, etc.
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
     else:
-        st.info("No hay datos en la nube.")
+        st.info("Aún no has archivado ningún registro al finalizar el día.")
