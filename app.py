@@ -77,7 +77,7 @@ else:
     df = pd.DataFrame()
 
 # --- 3. Interfaz de Usuario ---
-tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "📅 Historial"])
+tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Registro", "📅 Historial"])
 
 # ==========================================
 # PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS 
