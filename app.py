@@ -3,6 +3,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import time 
+import pytz
 
 # --- 1. Configuración Profesional de la página ---
 st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_icon="🅿️")
@@ -56,7 +58,7 @@ except Exception as e:
 datos = hoja_datos.get_all_records()
 if datos:
     df = pd.DataFrame(datos)
-    # Rellenamos celdas vacías con guiones para que no haya errores
+    # Rellenamos celdas vacías para que no haya errores
     for col in ["Hora de Ingreso", "Hora de Salida", "Pago"]:
         if col not in df.columns:
             df[col] = ""
@@ -94,39 +96,46 @@ with tab_control:
         st.write("---")
         st.write("👉 **Acciones Rápidas**")
         
-        # Botones de Acción (Usamos columnas para que se vean como un panel de control)
+        # Botones de Acción
         col1, col2, col3 = st.columns(3)
         
-        # Función para obtener la hora actual
-        hora_actual = datetime.now().strftime("%H:%M")
+        # --- CONFIGURACIÓN DE HORA LOCAL ---
+        # Si estás en otro país, puedes cambiar 'America/Lima' por 'America/Bogota', 'America/Mexico_City', etc.
+        zona_horaria = pytz.timezone('America/Lima') 
+        hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
         
         with col1:
             if st.button("🟢 Ingreso", use_container_width=True):
                 hoja_datos.update_cell(fila_idx, 4, hora_actual)
                 st.success(f"Ingreso marcado a las {hora_actual}")
+                time.sleep(1) # Pausa para que Google Sheets guarde
                 st.rerun()
                 
         with col2:
             if st.button("🔴 Salida", use_container_width=True):
                 hoja_datos.update_cell(fila_idx, 5, hora_actual)
                 st.success(f"Salida marcada a las {hora_actual}")
+                time.sleep(1)
                 st.rerun()
                 
         with col3:
             if st.button("💵 Pagó", type="primary", use_container_width=True):
                 hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
                 st.success("¡Pago registrado!")
+                time.sleep(1)
                 st.rerun()
                 
         # Botón para limpiar el estado al final del día
         if st.button("🔄 Limpiar Asistencia (Nuevo Día)"):
             hoja_datos.update_cell(fila_idx, 4, "")
             hoja_datos.update_cell(fila_idx, 5, "")
-            hoja_datos.update_cell(fila_idx, 6, "")
+            hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+            st.success("¡Datos limpiados para un nuevo día!")
+            time.sleep(1)
             st.rerun()
 
     else:
-        st.warning("No hay vehículos. Ve a 'Gestión' para agregar uno.")
+        st.warning("No hay vehículos. Ve a 'Gestión Vehículos' para agregar uno.")
 
 # ==========================================
 # PESTAÑA 2: GESTIÓN (AGREGAR / ELIMINAR)
@@ -142,8 +151,9 @@ with tab_gestion:
                     st.error("⚠️ La placa ya existe.")
                 else:
                     nuevo_n = len(datos) + 1 if datos else 1
-                    hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente"])
+                    hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente 🔴"])
                     st.success("✅ Vehículo guardado.")
+                    time.sleep(1)
                     st.rerun()
             else:
                 st.warning("Completa los datos.")
@@ -156,6 +166,7 @@ with tab_gestion:
             f_idx = df.index[df['Placa'].astype(str) == placa_eliminar].tolist()[0] + 2
             hoja_datos.delete_rows(f_idx)
             st.success("Vehículo eliminado.")
+            time.sleep(1)
             st.rerun()
 
 # ==========================================
