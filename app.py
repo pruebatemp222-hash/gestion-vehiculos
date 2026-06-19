@@ -35,7 +35,7 @@ st.markdown("""
 
 st.title("🅿️ Control de Parqueo")
 
-# --- 2. Conexión a Base de Datos (Con Historial Automático) ---
+# --- 2. Conexión a Base de Datos (Con Historial y Abonos) ---
 @st.cache_resource
 def conectar_sheets():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -46,16 +46,24 @@ def conectar_sheets():
     archivo = cliente.open("Vehiculos_App")
     hoja_principal = archivo.sheet1
     
+    # Crea pestaña "Historial" si no existe
     try:
         hoja_hist = archivo.worksheet("Historial")
     except gspread.exceptions.WorksheetNotFound:
         hoja_hist = archivo.add_worksheet(title="Historial", rows="1000", cols="6")
         hoja_hist.append_row(["Fecha", "Placa", "Propietario", "Hora de Ingreso", "Hora de Salida", "Pago"])
         
-    return hoja_principal, hoja_hist
+    # Crea pestaña "Abonos" (Pagos múltiples) si no existe
+    try:
+        hoja_abonos = archivo.worksheet("Abonos")
+    except gspread.exceptions.WorksheetNotFound:
+        hoja_abonos = archivo.add_worksheet(title="Abonos", rows="1000", cols="5")
+        hoja_abonos.append_row(["Fecha", "Placa", "Propietario", "Descripción del Periodo", "Monto Pagado"])
+        
+    return hoja_principal, hoja_hist, hoja_abonos
 
 try:
-    hoja_datos, hoja_historial = conectar_sheets()
+    hoja_datos, hoja_historial, hoja_abonos = conectar_sheets()
 except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
@@ -76,7 +84,13 @@ else:
     df = pd.DataFrame()
 
 # --- 3. Interfaz de Usuario ---
-tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "📅 Historial"])
+# ¡Agregamos una 4ta pestaña!
+tab_control, tab_gestion, tab_pagos, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "💰 Pagos Múltiples", "📅 Historial"])
+
+# Configuración de Hora Local Global
+zona_horaria = pytz.timezone('America/Lima') 
+hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
+fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
 
 # ==========================================
 # PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS
@@ -86,7 +100,7 @@ with tab_control:
     
     if not df.empty:
         lista_placas = df["Placa"].astype(str).tolist()
-        placa_sel = st.selectbox("🔍 Selecciona un Vehículo:", lista_placas)
+        placa_sel = st.selectbox("🔍 Selecciona un Vehículo:", lista_placas, key="panel_placa")
         
         vehiculos_filtrados = df[df["Placa"].astype(str) == placa_sel]
         
@@ -103,30 +117,20 @@ with tab_control:
             
             st.write("---")
             
-            # --- RECORDATORIO VISUAL PENDIENTE/DEUDA ---
             if vehiculo["Hora de Ingreso"] != "" and vehiculo["Pago"] == "Pendiente 🔴":
                 st.warning("⚠️ RECORDATORIO: Este vehículo aún tiene un PAGO PENDIENTE.")
             elif vehiculo["Pago"] == "No Pagó ❌":
                 st.error("🚨 ALERTA: Este vehículo registra una DEUDA de su visita.")
             
-            # Configuración de Hora Local
-            zona_horaria = pytz.timezone('America/Lima') 
-            hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
-            fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
-            
-            # --- BOTONES EN FORMATO 2x2 PARA CELULAR ---
             col1, col2 = st.columns(2)
             col3, col4 = st.columns(2)
             
             with col1:
                 if st.button("🟢 Ingreso", use_container_width=True):
-                    # Al marcar Ingreso, reiniciamos la salida y pago para empezar de cero
                     hoja_datos.update_cell(fila_idx, 4, hora_actual)
                     hoja_datos.update_cell(fila_idx, 5, "")
                     hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
-                    # Guardamos el registro automático en el historial
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], hora_actual, "", "Pendiente 🔴"])
-                    
                     st.success(f"✅ Ingreso actualizado y guardado en Historial.")
                     time.sleep(1.5)
                     st.rerun()
@@ -134,9 +138,7 @@ with tab_control:
             with col2:
                 if st.button("🔴 Salida", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 5, hora_actual)
-                    # Guardamos el registro automático en el historial
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, vehiculo['Pago']])
-                    
                     st.success(f"✅ Salida actualizada y guardada en Historial.")
                     time.sleep(1.5)
                     st.rerun()
@@ -144,9 +146,7 @@ with tab_control:
             with col3:
                 if st.button("💵 Pagó", type="primary", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
-                    # Guardamos el registro automático en el historial
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
-                    
                     st.success("✅ Pago registrado y guardado en Historial.")
                     time.sleep(1.5)
                     st.rerun()
@@ -154,9 +154,7 @@ with tab_control:
             with col4:
                 if st.button("❌ No Pagó", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "No Pagó ❌")
-                    # Guardamos el registro automático en el historial
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
-                    
                     st.error("❌ Deuda registrada y guardada en Historial.")
                     time.sleep(1.5)
                     st.rerun()
@@ -200,10 +198,61 @@ with tab_gestion:
             st.rerun()
 
 # ==========================================
-# PESTAÑA 3: HISTORIAL MULTI-FILTRO (FECHA Y PLACA)
+# PESTAÑA 3: PAGOS MÚLTIPLES (POR DÍAS/SEMANAS)
+# ==========================================
+with tab_pagos:
+    st.subheader("Registrar Abonos Adelantados o Atrasados")
+    
+    if not df.empty:
+        with st.form("form_pagos", clear_on_submit=True):
+            placa_pago = st.selectbox("🚗 Vehículo:", df["Placa"].astype(str).tolist())
+            descripcion = st.text_input("📝 Descripción (ej: Pago por 5 días, Semana del 1 al 7):")
+            monto = st.number_input("💰 Monto Pagado:", min_value=0.0, step=1.0, format="%.2f")
+            
+            if st.form_submit_button("Registrar Pago Múltiple 💵"):
+                if descripcion and monto > 0:
+                    propietario_pago = df[df["Placa"].astype(str) == placa_pago].iloc[0]["Propietario"]
+                    hoja_abonos.append_row([fecha_actual, placa_pago, propietario_pago, descripcion, monto])
+                    st.success(f"✅ Pago de S/{monto} registrado a {placa_pago}.")
+                    time.sleep(1.5)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Debes ingresar una descripción y un monto mayor a 0.")
+                    
+        st.write("---")
+        st.subheader("Eliminar Pagos Múltiples")
+        
+        try:
+            datos_abonos = hoja_abonos.get_all_records()
+        except Exception:
+            datos_abonos = []
+            
+        if datos_abonos:
+            df_abonos = pd.DataFrame(datos_abonos)
+            st.dataframe(df_abonos, use_container_width=True)
+            
+            # Formatear la lista para mostrar la fila exacta, placa y monto
+            lista_opciones_abono = [f"Fila {idx + 2} | {row['Fecha']} - {row['Placa']} - S/{row['Monto Pagado']}" for idx, row in df_abonos.iterrows()]
+            
+            abono_a_eliminar = st.selectbox("Selecciona el pago que deseas anular:", lista_opciones_abono)
+            
+            if st.button("❌ Eliminar Este Pago"):
+                # Extraemos el número exacto de la fila a borrar
+                fila_abono_idx = int(abono_a_eliminar.split("|")[0].replace("Fila", "").strip())
+                hoja_abonos.delete_rows(fila_abono_idx)
+                st.success("✅ Pago eliminado correctamente de la base de datos.")
+                time.sleep(1.5)
+                st.rerun()
+        else:
+            st.info("No hay pagos múltiples registrados todavía.")
+    else:
+        st.warning("Agrega vehículos en 'Gestión' primero.")
+
+# ==========================================
+# PESTAÑA 4: HISTORIAL MULTI-FILTRO (DIARIO)
 # ==========================================
 with tab_historial:
-    st.subheader("📅 Historial y Búsqueda")
+    st.subheader("📅 Historial Diario")
     
     try:
         datos_historial = hoja_historial.get_all_records()
@@ -222,7 +271,7 @@ with tab_historial:
             fecha_seleccionada = st.selectbox("📅 Filtrar por Fecha:", fechas_unicas)
             
         with col_filtro2:
-            placa_seleccionada_hist = st.selectbox("🚗 Filtrar por Placa:", placas_unicas)
+            placa_seleccionada_hist = st.selectbox("🚗 Filtrar por Placa:", placas_unicas, key="hist_placa")
             
         st.write("---")
         
@@ -241,4 +290,4 @@ with tab_historial:
             st.warning("⚠️ No tiene resultados en la búsqueda.")
             
     else:
-        st.info("Aún no has archivado ningún registro. Presiona cualquier botón en el Panel para crear el primer historial.")
+        st.info("Aún no has archivado ningún registro diario.")
