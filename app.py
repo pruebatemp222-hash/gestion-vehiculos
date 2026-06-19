@@ -84,7 +84,6 @@ else:
     df = pd.DataFrame()
 
 # --- 3. Interfaz de Usuario ---
-# ¡Agregamos una 4ta pestaña!
 tab_control, tab_gestion, tab_pagos, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "💰 Pagos Múltiples", "📅 Historial"])
 
 # Configuración de Hora Local Global
@@ -206,18 +205,37 @@ with tab_pagos:
     if not df.empty:
         with st.form("form_pagos", clear_on_submit=True):
             placa_pago = st.selectbox("🚗 Vehículo:", df["Placa"].astype(str).tolist())
-            descripcion = st.text_input("📝 Descripción (ej: Pago por 5 días, Semana del 1 al 7):")
+            
+            st.write("📅 **Selecciona los días a pagar:**")
+            # Selector de fechas (permite escoger un rango si haces doble clic, o un solo día)
+            fechas_pago = st.date_input("Haz clic para elegir Inicio y Fin (o un solo día):", value=[], format="DD/MM/YYYY")
+            
             monto = st.number_input("💰 Monto Pagado:", min_value=0.0, step=1.0, format="%.2f")
             
             if st.form_submit_button("Registrar Pago Múltiple 💵"):
-                if descripcion and monto > 0:
+                descripcion_generada = ""
+                
+                # Lógica para procesar la selección del calendario
+                if isinstance(fechas_pago, tuple) or isinstance(fechas_pago, list):
+                    if len(fechas_pago) == 2:
+                        # Rango de fechas (Ej: Del 10/06/2026 al 15/06/2026)
+                        dias_total = (fechas_pago[1] - fechas_pago[0]).days + 1
+                        descripcion_generada = f"Del {fechas_pago[0].strftime('%d/%m/%Y')} al {fechas_pago[1].strftime('%d/%m/%Y')} ({dias_total} días)"
+                    elif len(fechas_pago) == 1:
+                        # Un solo día
+                        descripcion_generada = f"Día: {fechas_pago[0].strftime('%d/%m/%Y')}"
+                elif fechas_pago:
+                    # Alternativa si Streamlit devuelve un solo objeto 'date'
+                    descripcion_generada = f"Día: {fechas_pago.strftime('%d/%m/%Y')}"
+
+                if descripcion_generada and monto > 0:
                     propietario_pago = df[df["Placa"].astype(str) == placa_pago].iloc[0]["Propietario"]
-                    hoja_abonos.append_row([fecha_actual, placa_pago, propietario_pago, descripcion, monto])
-                    st.success(f"✅ Pago de S/{monto} registrado a {placa_pago}.")
+                    hoja_abonos.append_row([fecha_actual, placa_pago, propietario_pago, descripcion_generada, monto])
+                    st.success(f"✅ Pago de S/{monto} registrado a {placa_pago}. Guardado como: {descripcion_generada}")
                     time.sleep(1.5)
                     st.rerun()
                 else:
-                    st.warning("⚠️ Debes ingresar una descripción y un monto mayor a 0.")
+                    st.warning("⚠️ Debes seleccionar al menos una fecha y un monto mayor a 0.")
                     
         st.write("---")
         st.subheader("Eliminar Pagos Múltiples")
