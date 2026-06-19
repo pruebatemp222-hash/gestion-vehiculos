@@ -46,7 +46,6 @@ def conectar_sheets():
     archivo = cliente.open("Vehiculos_App")
     hoja_principal = archivo.sheet1
     
-    # Busca la pestaña "Historial". Si no existe, la crea automáticamente.
     try:
         hoja_hist = archivo.worksheet("Historial")
     except gspread.exceptions.WorksheetNotFound:
@@ -80,7 +79,7 @@ else:
 tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "📅 Historial"])
 
 # ==========================================
-# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS (AUTOMATIZADO)
+# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS
 # ==========================================
 with tab_control:
     st.subheader("Control en Vivo")
@@ -104,57 +103,64 @@ with tab_control:
             
             st.write("---")
             
-            # --- RECORDATORIO VISUAL DE PAGO PENDIENTE ---
-            if vehiculo["Hora de Ingreso"] != "" and vehiculo["Pago"] != "Pagado ✅":
-                st.error("⚠️ RECORDATORIO: Este vehículo tiene un PAGO PENDIENTE.")
+            # --- RECORDATORIO VISUAL PENDIENTE/DEUDA ---
+            if vehiculo["Hora de Ingreso"] != "" and vehiculo["Pago"] == "Pendiente 🔴":
+                st.warning("⚠️ RECORDATORIO: Este vehículo aún tiene un PAGO PENDIENTE.")
+            elif vehiculo["Pago"] == "No Pagó ❌":
+                st.error("🚨 ALERTA: Este vehículo registra una DEUDA de su visita.")
             
             # Configuración de Hora Local
             zona_horaria = pytz.timezone('America/Lima') 
             hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
             fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
             
-            col1, col2, col3 = st.columns(3)
+            # --- BOTONES EN FORMATO 2x2 PARA CELULAR ---
+            col1, col2 = st.columns(2)
+            col3, col4 = st.columns(2)
             
             with col1:
                 if st.button("🟢 Ingreso", use_container_width=True):
+                    # Al marcar Ingreso, reiniciamos la salida y pago para empezar de cero
                     hoja_datos.update_cell(fila_idx, 4, hora_actual)
-                    st.success(f"✅ Cambios actualizados: Ingreso a las {hora_actual}")
+                    hoja_datos.update_cell(fila_idx, 5, "")
+                    hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+                    # Guardamos el registro automático en el historial
+                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], hora_actual, "", "Pendiente 🔴"])
+                    
+                    st.success(f"✅ Ingreso actualizado y guardado en Historial.")
                     time.sleep(1.5)
                     st.rerun()
                     
             with col2:
                 if st.button("🔴 Salida", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 5, hora_actual)
+                    # Guardamos el registro automático en el historial
+                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, vehiculo['Pago']])
                     
-                    # Lógica de Autoguardado al marcar Salida
-                    if vehiculo["Pago"] == "Pagado ✅":
-                        hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, "Pagado ✅"])
-                        hoja_datos.update_cell(fila_idx, 4, "")
-                        hoja_datos.update_cell(fila_idx, 5, "")
-                        hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
-                        st.success("✅ Ciclo completado. Datos guardados en el historial automáticamente.")
-                    else:
-                        st.warning(f"⚠️ Cambios actualizados: Salida a las {hora_actual}. ¡NO OLVIDES COBRAR!")
-                        
-                    time.sleep(2)
+                    st.success(f"✅ Salida actualizada y guardada en Historial.")
+                    time.sleep(1.5)
                     st.rerun()
                     
             with col3:
                 if st.button("💵 Pagó", type="primary", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
+                    # Guardamos el registro automático en el historial
+                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
                     
-                    # Lógica de Autoguardado al marcar Pago
-                    if vehiculo["Hora de Salida"] != "":
-                        hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
-                        hoja_datos.update_cell(fila_idx, 4, "")
-                        hoja_datos.update_cell(fila_idx, 5, "")
-                        hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
-                        st.success("✅ Pago registrado. ¡Ciclo completado! Datos guardados en el historial automáticamente.")
-                    else:
-                        st.success("✅ Cambios actualizados: Pago registrado correctamente.")
-                        
-                    time.sleep(2)
+                    st.success("✅ Pago registrado y guardado en Historial.")
+                    time.sleep(1.5)
                     st.rerun()
+                    
+            with col4:
+                if st.button("❌ No Pagó", use_container_width=True):
+                    hoja_datos.update_cell(fila_idx, 6, "No Pagó ❌")
+                    # Guardamos el registro automático en el historial
+                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
+                    
+                    st.error("❌ Deuda registrada y guardada en Historial.")
+                    time.sleep(1.5)
+                    st.rerun()
+                    
         else:
             st.warning("⚠️ No tiene resultados en la búsqueda.")
 
@@ -235,4 +241,4 @@ with tab_historial:
             st.warning("⚠️ No tiene resultados en la búsqueda.")
             
     else:
-        st.info("Aún no has archivado ningún registro. El autoguardado lo hará por ti al completar un pago y salida.")
+        st.info("Aún no has archivado ningún registro. Presiona cualquier botón en el Panel para crear el primer historial.")
