@@ -2,55 +2,48 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+from datetime import datetime
 
-# --- 1. Configuración de la página (Debe ser el primer comando) ---
-st.set_page_config(page_title="Gestión Vehículos", layout="centered", page_icon="🚗")
+# --- 1. Configuración Profesional de la página ---
+st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_icon="🅿️")
 
-# --- CSS Personalizado para Optimización Móvil (Touch-Friendly) ---
+# --- CSS para Diseño Móvil de Alta Gama ---
 st.markdown("""
     <style>
-    /* Hacer que todos los botones de envío ocupen el 100% del ancho del celular */
+    /* Botones principales grandes */
     div.stButton > button {
         width: 100% !important;
-        height: 50px !important;
+        height: 55px !important;
         font-size: 16px !important;
         font-weight: bold !important;
-        border-radius: 10px !important;
-        margin-top: 10px;
+        border-radius: 12px !important;
+        border: none !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: 0.3s;
     }
-    /* Estilizar la barra de pestañas para que parezcan botones de menú móvil */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        width: 100%;
+    div.stButton > button:active {
+        transform: scale(0.95);
     }
+    /* Estilo de las pestañas */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        background-color: #f0f2f6;
-        border-radius: 8px;
-        padding: 0px 12px;
-        font-weight: bold;
-        font-size: 14px;
-        flex-grow: 1;
-        text-align: center;
-    }
-    /* Cambiar el color del input en foco para pantallas móviles */
-    input {
-        font-size: 16px !important; /* Evita que iOS haga zoom automático molesto */
+        height: 50px;
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        font-weight: 600;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Gestión de Vehículos 🚗")
+st.title("🅿️ Control de Parqueo")
 
-# --- 2. Conexión a Google Sheets ---
+# --- 2. Conexión a Base de Datos ---
 @st.cache_resource
 def conectar_sheets():
     creds_dict = dict(st.secrets["gcp_service_account"])
-    # Ajuste para procesar correctamente los saltos de línea de la clave privada
     creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
     creds = Credentials.from_service_account_info(creds_dict)
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    cliente = gspread.authorize(creds.with_scopes(scopes))
+    cliente = gspread.authorize(creds.with_scopes(["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]))
     return cliente.open("Vehiculos_App").sheet1
 
 try:
@@ -59,87 +52,120 @@ except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
 
-# Traemos la información fresca desde Google Sheets
+# Obtener datos y asegurar que existan las columnas base
 datos = hoja_datos.get_all_records()
-df = pd.DataFrame(datos) if datos else pd.DataFrame()
+if datos:
+    df = pd.DataFrame(datos)
+    # Rellenamos celdas vacías con guiones para que no haya errores
+    for col in ["Hora de Ingreso", "Hora de Salida", "Pago"]:
+        if col not in df.columns:
+            df[col] = ""
+    df.fillna("", inplace=True)
+else:
+    df = pd.DataFrame()
 
-# --- 3. Organización de la Interfaz en "Botones" de Pestaña ---
-# En un celular, estas pestañas se expanden horizontalmente ocupando todo el ancho de la pantalla
-tab_agregar, tab_eliminar, tab_tiempos = st.tabs(["➕ Agregar", "❌ Eliminar", "📋 Lista / Horas"])
+# --- 3. Interfaz de Usuario (Pestañas Móviles) ---
+tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Asistencia y Cobro", "⚙️ Gestión Vehículos", "📋 Ver Todo"])
 
-# --- PESTAÑA: AGREGAR VEHÍCULO ---
-with tab_agregar:
-    st.subheader("Agregar Nuevo Vehículo")
-    with st.form("form_vehiculo", clear_on_submit=True):
-        placa = st.text_input("Placa del Vehículo:").strip()
-        propietario = st.text_input("Nombre del Propietario:").strip()
-        
-        # Botón grande ideal para pantallas táctiles
-        enviado = st.form_submit_button("Confirmar Registro ➕")
-
-        if enviado:
-            if placa and propietario:
-                # Evitar que registren la misma placa duplicada
-                if not df.empty and placa.lower() in df["Placa"].astype(str).str.lower().values:
-                    st.error(f"⚠️ La placa '{placa}' ya está registrada en el sistema.")
-                else:
-                    nuevo_numero = len(datos) + 1 if datos else 1
-                    # Añadimos los campos base y dejamos las horas vacías para rellenar después
-                    hoja_datos.append_row([nuevo_numero, placa, propietario, "", ""])
-                    st.success(f"✅ ¡Vehículo {placa} guardado con éxito!")
-                    st.rerun()
-            else:
-                st.warning("⚠️ Completa los dos campos de texto.")
-
-# --- PESTAÑA: ELIMINAR VEHÍCULO ---
-with tab_eliminar:
-    st.subheader("Eliminar Vehículo del Sistema")
+# ==========================================
+# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS (EL DASHBOARD)
+# ==========================================
+with tab_control:
+    st.subheader("Control de Vehículos en Vivo")
+    
     if not df.empty:
+        # Selector de Vehículo
         lista_placas = df["Placa"].astype(str).tolist()
-        # Lista desplegable nativa móvil para seleccionar de forma rápida con el dedo
-        placa_a_eliminar = st.selectbox("Selecciona la Placa a dar de baja:", lista_placas)
+        placa_sel = st.selectbox("🔍 Selecciona un Vehículo para operar:", lista_placas)
         
-        # Mostrar a quién pertenece antes de borrar para evitar accidentes
-        info_v = df[df["Placa"].astype(str) == placa_a_eliminar].iloc[0]
-        st.error(f"⚠️ Atención: Vas a eliminar el vehículo de **{info_v['Propietario']}**")
+        # Obtener los datos específicos del vehículo seleccionado
+        vehiculo = df[df["Placa"].astype(str) == placa_sel].iloc[0]
+        fila_idx = df.index[df['Placa'].astype(str) == placa_sel].tolist()[0] + 2
         
-        with st.form("form_eliminar"):
-            confirmar_eliminar = st.form_submit_button("Confirmar Eliminar 🗑️")
-            
-            if confirmar_eliminar:
-                # Buscamos el índice real en la hoja (+2 por cabecera y desfase de índice)
-                fila_indice = df.index[df['Placa'].astype(str) == placa_a_eliminar].tolist()[0] + 2
-                hoja_datos.delete_rows(fila_indice)
-                st.success(f"🗑️ Registro de la placa {placa_a_eliminar} borrado completamente.")
-                st.rerun()
-    else:
-        st.info("No hay vehículos registrados para poder eliminar.")
-
-# --- PESTAÑA: LISTA GENERAL Y CONTROL DE TIEMPOS ---
-with tab_tiempos:
-    st.subheader("Control de Ingresos y Salidas")
-    if not df.empty:
-        lista_placas_t = df["Placa"].astype(str).tolist()
-        placa_seleccionada = st.selectbox("Buscar Vehículo por Placa:", lista_placas_t, key="sb_tiempos")
+        # Tarjeta de Información Visual
+        st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel}")
         
-        with st.form("form_tiempos"):
-            hora_ingreso = st.text_input("Hora de Ingreso (ej: 07:15):")
-            hora_salida = st.text_input("Hora de Salida (ej: 18:00):")
-            actualizar = st.form_submit_button("Guardar Horarios ⏱️")
-
-            if actualizar:
-                fila_indice = df.index[df['Placa'].astype(str) == placa_seleccionada].tolist()[0] + 2
-                if hora_ingreso:
-                    hoja_datos.update_cell(fila_indice, 4, hora_ingreso) # Columna D
-                if hora_salida:
-                    hoja_datos.update_cell(fila_indice, 5, hora_salida) # Columna E
-                    
-                st.success(f"⏱️ Horarios guardados para la placa {placa_seleccionada}.")
+        # Métricas del estado actual
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Hora Ingreso", vehiculo["Hora de Ingreso"] if vehiculo["Hora de Ingreso"] else "--:--")
+        col_m2.metric("Hora Salida", vehiculo["Hora de Salida"] if vehiculo["Hora de Salida"] else "--:--")
+        col_m3.metric("Estado Pago", vehiculo["Pago"] if vehiculo["Pago"] else "Pendiente 🔴")
+        
+        st.write("---")
+        st.write("👉 **Acciones Rápidas**")
+        
+        # Botones de Acción (Usamos columnas para que se vean como un panel de control)
+        col1, col2, col3 = st.columns(3)
+        
+        # Función para obtener la hora actual
+        hora_actual = datetime.now().strftime("%H:%M")
+        
+        with col1:
+            if st.button("🟢 Ingreso", use_container_width=True):
+                hoja_datos.update_cell(fila_idx, 4, hora_actual)
+                st.success(f"Ingreso marcado a las {hora_actual}")
                 st.rerun()
                 
-        st.write("---")
-        st.subheader("📋 Tabla de Registros en la Nube")
-        # st.dataframe se adapta perfectamente al ancho de las pantallas de celular
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        with col2:
+            if st.button("🔴 Salida", use_container_width=True):
+                hoja_datos.update_cell(fila_idx, 5, hora_actual)
+                st.success(f"Salida marcada a las {hora_actual}")
+                st.rerun()
+                
+        with col3:
+            if st.button("💵 Pagó", type="primary", use_container_width=True):
+                hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
+                st.success("¡Pago registrado!")
+                st.rerun()
+                
+        # Botón para limpiar el estado al final del día
+        if st.button("🔄 Limpiar Asistencia (Nuevo Día)"):
+            hoja_datos.update_cell(fila_idx, 4, "")
+            hoja_datos.update_cell(fila_idx, 5, "")
+            hoja_datos.update_cell(fila_idx, 6, "")
+            st.rerun()
+
     else:
-        st.info("No hay vehículos para mostrar o registrar tiempos.")
+        st.warning("No hay vehículos. Ve a 'Gestión' para agregar uno.")
+
+# ==========================================
+# PESTAÑA 2: GESTIÓN (AGREGAR / ELIMINAR)
+# ==========================================
+with tab_gestion:
+    st.subheader("Registrar Nuevo")
+    with st.form("form_nuevo", clear_on_submit=True):
+        n_placa = st.text_input("Placa:").strip()
+        n_prop = st.text_input("Propietario:").strip()
+        if st.form_submit_button("Guardar Vehículo ➕"):
+            if n_placa and n_prop:
+                if not df.empty and n_placa.lower() in df["Placa"].astype(str).str.lower().values:
+                    st.error("⚠️ La placa ya existe.")
+                else:
+                    nuevo_n = len(datos) + 1 if datos else 1
+                    hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente"])
+                    st.success("✅ Vehículo guardado.")
+                    st.rerun()
+            else:
+                st.warning("Completa los datos.")
+                
+    st.write("---")
+    st.subheader("Eliminar Registro")
+    if not df.empty:
+        placa_eliminar = st.selectbox("Seleccionar Placa para Borrar:", df["Placa"].astype(str).tolist())
+        if st.button("Eliminar Vehículo 🗑️"):
+            f_idx = df.index[df['Placa'].astype(str) == placa_eliminar].tolist()[0] + 2
+            hoja_datos.delete_rows(f_idx)
+            st.success("Vehículo eliminado.")
+            st.rerun()
+
+# ==========================================
+# PESTAÑA 3: HISTORIAL / PREVISUALIZAR BASE
+# ==========================================
+with tab_historial:
+    st.subheader("Previsualización Global 📋")
+    if not df.empty:
+        # Filtramos un poco los datos para que se vea más limpio en el celular
+        df_mostrar = df[["Placa", "Propietario", "Hora de Ingreso", "Hora de Salida", "Pago"]]
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay datos en la nube.")
