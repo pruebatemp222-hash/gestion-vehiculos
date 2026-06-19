@@ -11,13 +11,19 @@ st.title("Gestión de Vehículos 🚗")
 # Usamos cache para no reconectarnos en cada clic y hacer la app más rápida
 @st.cache_resource
 def conectar_sheets():
+    # Obtener credenciales desde los secretos de Streamlit
+    creds_dict = st.secrets["gcp_service_account"]
+    
+    # Crear credenciales a partir del diccionario
+    creds = Credentials.from_service_account_info(creds_dict)
+    
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    # Busca el archivo de llave secreta que descargaremos de Google
-    credenciales = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
-    cliente = gspread.authorize(credenciales)
+    
+    scoped_creds = creds.with_scopes(scopes)
+    cliente = gspread.authorize(scoped_creds)
     
     # Conecta con tu archivo de Google Sheets
     hoja = cliente.open("Vehiculos_App").sheet1
