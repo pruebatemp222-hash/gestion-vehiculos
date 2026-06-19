@@ -7,7 +7,7 @@ import time
 import pytz
 
 # --- 1. Configuración Profesional de la página ---
-st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_icon="🅿️")
+st.set_page_config(page_title="SHREK", layout="centered", page_icon="🅿️")
 
 # --- CSS para Diseño Móvil de Alta Gama ---
 st.markdown("""
