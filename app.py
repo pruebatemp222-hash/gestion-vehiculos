@@ -61,8 +61,12 @@ except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
 
-# Obtener datos de vehículos activos
-datos = hoja_datos.get_all_records()
+# --- BLINDAJE CONTRA ERRORES DE LECTURA ---
+try:
+    datos = hoja_datos.get_all_records()
+except Exception:
+    datos = []
+
 if datos:
     df = pd.DataFrame(datos)
     for col in ["Hora de Ingreso", "Hora de Salida", "Pago"]:
@@ -85,66 +89,72 @@ with tab_control:
         lista_placas = df["Placa"].astype(str).tolist()
         placa_sel = st.selectbox("🔍 Selecciona un Vehículo:", lista_placas)
         
-        vehiculo = df[df["Placa"].astype(str) == placa_sel].iloc[0]
-        fila_idx = df.index[df['Placa'].astype(str) == placa_sel].tolist()[0] + 2
+        # Validación extra por si la placa seleccionada no se encuentra en el DataFrame
+        vehiculos_filtrados = df[df["Placa"].astype(str) == placa_sel]
         
-        st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel}")
-        
-        col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Ingreso", vehiculo["Hora de Ingreso"] if vehiculo["Hora de Ingreso"] else "--:--")
-        col_m2.metric("Salida", vehiculo["Hora de Salida"] if vehiculo["Hora de Salida"] else "--:--")
-        col_m3.metric("Pago", vehiculo["Pago"] if vehiculo["Pago"] else "Pendiente 🔴")
-        
-        st.write("---")
-        
-        # Configuración de Hora Local
-        zona_horaria = pytz.timezone('America/Lima') 
-        hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🟢 Ingreso", use_container_width=True):
-                hoja_datos.update_cell(fila_idx, 4, hora_actual)
-                st.success(f"Ingreso: {hora_actual}")
-                time.sleep(1)
-                st.rerun()
-                
-        with col2:
-            if st.button("🔴 Salida", use_container_width=True):
-                hoja_datos.update_cell(fila_idx, 5, hora_actual)
-                st.success(f"Salida: {hora_actual}")
-                time.sleep(1)
-                st.rerun()
-                
-        with col3:
-            if st.button("💵 Pagó", type="primary", use_container_width=True):
-                hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
-                st.success("¡Pago registrado!")
-                time.sleep(1)
-                st.rerun()
-                
-        st.write("---")
-        # --- SISTEMA DE ARCHIVADO ---
-        if st.button("📦 Archivar en Historial y Cerrar Día"):
-            fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
+        if not vehiculos_filtrados.empty:
+            vehiculo = vehiculos_filtrados.iloc[0]
+            fila_idx = df.index[df['Placa'].astype(str) == placa_sel].tolist()[0] + 2
             
-            hoja_historial.append_row([
-                fecha_actual, 
-                placa_sel, 
-                vehiculo['Propietario'], 
-                vehiculo['Hora de Ingreso'], 
-                vehiculo['Hora de Salida'], 
-                vehiculo['Pago']
-            ])
+            st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel}")
             
-            hoja_datos.update_cell(fila_idx, 4, "")
-            hoja_datos.update_cell(fila_idx, 5, "")
-            hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Ingreso", vehiculo["Hora de Ingreso"] if vehiculo["Hora de Ingreso"] else "--:--")
+            col_m2.metric("Salida", vehiculo["Hora de Salida"] if vehiculo["Hora de Salida"] else "--:--")
+            col_m3.metric("Pago", vehiculo["Pago"] if vehiculo["Pago"] else "Pendiente 🔴")
             
-            st.success(f"✅ ¡Datos de {placa_sel} guardados en el historial!")
-            time.sleep(1.5)
-            st.rerun()
+            st.write("---")
+            
+            # Configuración de Hora Local
+            zona_horaria = pytz.timezone('America/Lima') 
+            hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("🟢 Ingreso", use_container_width=True):
+                    hoja_datos.update_cell(fila_idx, 4, hora_actual)
+                    st.success(f"Ingreso: {hora_actual}")
+                    time.sleep(1)
+                    st.rerun()
+                    
+            with col2:
+                if st.button("🔴 Salida", use_container_width=True):
+                    hoja_datos.update_cell(fila_idx, 5, hora_actual)
+                    st.success(f"Salida: {hora_actual}")
+                    time.sleep(1)
+                    st.rerun()
+                    
+            with col3:
+                if st.button("💵 Pagó", type="primary", use_container_width=True):
+                    hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
+                    st.success("¡Pago registrado!")
+                    time.sleep(1)
+                    st.rerun()
+                    
+            st.write("---")
+            # --- SISTEMA DE ARCHIVADO ---
+            if st.button("📦 Archivar en Historial y Cerrar Día"):
+                fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
+                
+                hoja_historial.append_row([
+                    fecha_actual, 
+                    placa_sel, 
+                    vehiculo['Propietario'], 
+                    vehiculo['Hora de Ingreso'], 
+                    vehiculo['Hora de Salida'], 
+                    vehiculo['Pago']
+                ])
+                
+                hoja_datos.update_cell(fila_idx, 4, "")
+                hoja_datos.update_cell(fila_idx, 5, "")
+                hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+                
+                st.success(f"✅ ¡Datos de {placa_sel} guardados en el historial!")
+                time.sleep(1.5)
+                st.rerun()
+        else:
+            st.warning("⚠️ No tiene resultados en la búsqueda.")
 
     else:
         st.warning("Agrega un vehículo en la pestaña 'Gestión'.")
@@ -187,8 +197,11 @@ with tab_gestion:
 with tab_historial:
     st.subheader("📅 Historial y Búsqueda")
     
-    # Traemos los datos de la hoja de Historial
-    datos_historial = hoja_historial.get_all_records()
+    # --- BLINDAJE CONTRA ERRORES EN HISTORIAL ---
+    try:
+        datos_historial = hoja_historial.get_all_records()
+    except Exception:
+        datos_historial = []
     
     if datos_historial:
         df_hist = pd.DataFrame(datos_historial)
@@ -197,7 +210,6 @@ with tab_historial:
         fechas_unicas = ["Todas"] + df_hist["Fecha"].astype(str).unique().tolist()
         placas_unicas = ["Todas"] + df_hist["Placa"].astype(str).unique().tolist()
         
-        # 2. Crear dos columnas para que los filtros se vean ordenados en el celular
         col_filtro1, col_filtro2 = st.columns(2)
         
         with col_filtro1:
@@ -208,23 +220,21 @@ with tab_historial:
             
         st.write("---")
         
-        # 3. Lógica para aplicar los filtros al mismo tiempo
-        df_mostrar = df_hist.copy() # Hacemos una copia para no alterar los datos originales
+        df_mostrar = df_hist.copy() 
         
-        # Si elige una fecha específica, filtramos
         if fecha_seleccionada != "Todas":
             df_mostrar = df_mostrar[df_mostrar["Fecha"].astype(str) == fecha_seleccionada]
             
-        # Si elige una placa específica, filtramos también
         if placa_seleccionada_hist != "Todas":
             df_mostrar = df_mostrar[df_mostrar["Placa"].astype(str) == placa_seleccionada_hist]
             
-        # 4. Mostrar Resultados
+        # 4. Mostrar Resultados o Notificación de Vacío
         if not df_mostrar.empty:
             st.success(f"✅ Mostrando {len(df_mostrar)} resultados encontrados.")
             st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
         else:
-            st.warning("⚠️ No se encontraron registros con esa combinación de fecha y placa.")
+            # EL MENSAJE QUE SOLICITASTE
+            st.warning("⚠️ No tiene resultados en la búsqueda.")
             
     else:
         st.info("Aún no has archivado ningún registro al finalizar el día.")
