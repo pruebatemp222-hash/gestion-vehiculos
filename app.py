@@ -11,10 +11,19 @@ st.title("Gestión de Vehículos 🚗")
 # Usamos cache para no reconectarnos en cada clic y hacer la app más rápida
 @st.cache_resource
 def conectar_sheets():
-    # Obtener credenciales desde los secretos de Streamlit
-    creds_dict = st.secrets["gcp_service_account"]
+    # 1. Validar que los secretos de GCP existan en Streamlit
+    if "gcp_service_account" not in st.secrets:
+        st.error("⚠️ No se encontraron las credenciales en st.secrets.")
+        st.stop()
+        
+    # 2. Obtener el diccionario de secretos
+    creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # Crear credenciales a partir del diccionario
+    # 3. CORRECCIÓN CRÍTICA (Error PEM): 
+    # Asegurar que los saltos de línea literales se conviertan en saltos reales
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    
+    # 4. Crear credenciales a partir del diccionario limpio
     creds = Credentials.from_service_account_info(creds_dict)
     
     scopes = [
@@ -25,17 +34,16 @@ def conectar_sheets():
     scoped_creds = creds.with_scopes(scopes)
     cliente = gspread.authorize(scoped_creds)
     
-    # Conecta con tu archivo de Google Sheets
+    # 5. Conecta con tu archivo de Google Sheets (asegúrate de que se llame exactamente así)
     hoja = cliente.open("Vehiculos_App").sheet1
     return hoja
 
+# Intentar la conexión y manejar posibles errores visualmente
 try:
     hoja_datos = conectar_sheets()
-except FileNotFoundError:
-    st.error("⚠️ Falta el archivo 'credenciales.json'. Necesitamos conectarlo a Google Cloud.")
-    st.stop()
 except Exception as e:
-    st.error(f"Error al conectar con Google Sheets: {e}")
+    st.error(f"❌ Error al conectar con Google Sheets: {e}")
+    st.info("💡 Revisa que hayas configurado tus Secrets correctamente y que hayas compartido el Google Sheet con el correo 'client_email' de tu JSON.")
     st.stop()
 
 # --- 3. Formulario para agregar vehículos ---
@@ -57,9 +65,9 @@ with st.form("form_vehiculo", clear_on_submit=True):
             
             # Insertar la nueva fila directamente en Google Sheets
             hoja_datos.append_row([nuevo_numero, placa, propietario])
-            st.success(f"Vehículo {placa} agregado correctamente a la nube.")
+            st.success(f"✅ Vehículo {placa} agregado correctamente a la base de datos.")
         else:
-            st.warning("Por favor, completa ambos campos.")
+            st.warning("⚠️ Por favor, completa ambos campos antes de enviar.")
 
 # --- 4. Mostrar la tabla de registros ---
 st.subheader("Registros Actuales")
