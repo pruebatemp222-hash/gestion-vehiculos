@@ -7,7 +7,7 @@ import time
 import pytz
 
 # --- 1. Configuración Profesional de la página ---
-st.set_page_config(page_title="SHREK", layout="centered", page_icon="🅿️")
+st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_icon="🅿️")
 
 # --- CSS para Diseño Móvil de Alta Gama ---
 st.markdown("""
@@ -77,10 +77,10 @@ else:
     df = pd.DataFrame()
 
 # --- 3. Interfaz de Usuario ---
-tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Registro", "📅 Historial"])
+tab_control, tab_gestion, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "📅 Historial"])
 
 # ==========================================
-# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS 
+# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS (AUTOMATIZADO)
 # ==========================================
 with tab_control:
     st.subheader("Control en Vivo")
@@ -89,7 +89,6 @@ with tab_control:
         lista_placas = df["Placa"].astype(str).tolist()
         placa_sel = st.selectbox("🔍 Selecciona un Vehículo:", lista_placas)
         
-        # Validación extra por si la placa seleccionada no se encuentra en el DataFrame
         vehiculos_filtrados = df[df["Placa"].astype(str) == placa_sel]
         
         if not vehiculos_filtrados.empty:
@@ -105,54 +104,57 @@ with tab_control:
             
             st.write("---")
             
+            # --- RECORDATORIO VISUAL DE PAGO PENDIENTE ---
+            if vehiculo["Hora de Ingreso"] != "" and vehiculo["Pago"] != "Pagado ✅":
+                st.error("⚠️ RECORDATORIO: Este vehículo tiene un PAGO PENDIENTE.")
+            
             # Configuración de Hora Local
             zona_horaria = pytz.timezone('America/Lima') 
             hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
+            fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 if st.button("🟢 Ingreso", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 4, hora_actual)
-                    st.success(f"Ingreso: {hora_actual}")
-                    time.sleep(1)
+                    st.success(f"✅ Cambios actualizados: Ingreso a las {hora_actual}")
+                    time.sleep(1.5)
                     st.rerun()
                     
             with col2:
                 if st.button("🔴 Salida", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 5, hora_actual)
-                    st.success(f"Salida: {hora_actual}")
-                    time.sleep(1)
+                    
+                    # Lógica de Autoguardado al marcar Salida
+                    if vehiculo["Pago"] == "Pagado ✅":
+                        hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, "Pagado ✅"])
+                        hoja_datos.update_cell(fila_idx, 4, "")
+                        hoja_datos.update_cell(fila_idx, 5, "")
+                        hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+                        st.success("✅ Ciclo completado. Datos guardados en el historial automáticamente.")
+                    else:
+                        st.warning(f"⚠️ Cambios actualizados: Salida a las {hora_actual}. ¡NO OLVIDES COBRAR!")
+                        
+                    time.sleep(2)
                     st.rerun()
                     
             with col3:
                 if st.button("💵 Pagó", type="primary", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
-                    st.success("¡Pago registrado!")
-                    time.sleep(1)
-                    st.rerun()
                     
-            st.write("---")
-            # --- SISTEMA DE ARCHIVADO ---
-            if st.button("📦 Archivar en Historial y Cerrar Día"):
-                fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
-                
-                hoja_historial.append_row([
-                    fecha_actual, 
-                    placa_sel, 
-                    vehiculo['Propietario'], 
-                    vehiculo['Hora de Ingreso'], 
-                    vehiculo['Hora de Salida'], 
-                    vehiculo['Pago']
-                ])
-                
-                hoja_datos.update_cell(fila_idx, 4, "")
-                hoja_datos.update_cell(fila_idx, 5, "")
-                hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
-                
-                st.success(f"✅ ¡Datos de {placa_sel} guardados en el historial!")
-                time.sleep(1.5)
-                st.rerun()
+                    # Lógica de Autoguardado al marcar Pago
+                    if vehiculo["Hora de Salida"] != "":
+                        hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
+                        hoja_datos.update_cell(fila_idx, 4, "")
+                        hoja_datos.update_cell(fila_idx, 5, "")
+                        hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+                        st.success("✅ Pago registrado. ¡Ciclo completado! Datos guardados en el historial automáticamente.")
+                    else:
+                        st.success("✅ Cambios actualizados: Pago registrado correctamente.")
+                        
+                    time.sleep(2)
+                    st.rerun()
         else:
             st.warning("⚠️ No tiene resultados en la búsqueda.")
 
@@ -197,7 +199,6 @@ with tab_gestion:
 with tab_historial:
     st.subheader("📅 Historial y Búsqueda")
     
-    # --- BLINDAJE CONTRA ERRORES EN HISTORIAL ---
     try:
         datos_historial = hoja_historial.get_all_records()
     except Exception:
@@ -206,7 +207,6 @@ with tab_historial:
     if datos_historial:
         df_hist = pd.DataFrame(datos_historial)
         
-        # 1. Obtener listas únicas de Fechas y Placas
         fechas_unicas = ["Todas"] + df_hist["Fecha"].astype(str).unique().tolist()
         placas_unicas = ["Todas"] + df_hist["Placa"].astype(str).unique().tolist()
         
@@ -228,13 +228,11 @@ with tab_historial:
         if placa_seleccionada_hist != "Todas":
             df_mostrar = df_mostrar[df_mostrar["Placa"].astype(str) == placa_seleccionada_hist]
             
-        # 4. Mostrar Resultados o Notificación de Vacío
         if not df_mostrar.empty:
             st.success(f"✅ Mostrando {len(df_mostrar)} resultados encontrados.")
             st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
         else:
-            # EL MENSAJE QUE SOLICITASTE
             st.warning("⚠️ No tiene resultados en la búsqueda.")
             
     else:
-        st.info("Aún no has archivado ningún registro al finalizar el día.")
+        st.info("Aún no has archivado ningún registro. El autoguardado lo hará por ti al completar un pago y salida.")
