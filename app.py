@@ -182,10 +182,10 @@ with tab_gestion:
             st.rerun()
 
 # ==========================================
-# PESTAÑA 3: HISTORIAL POR VEHÍCULO
+# PESTAÑA 3: HISTORIAL MULTI-FILTRO (FECHA Y PLACA)
 # ==========================================
 with tab_historial:
-    st.subheader("📅 Historial por Vehículo")
+    st.subheader("📅 Historial y Búsqueda")
     
     # Traemos los datos de la hoja de Historial
     datos_historial = hoja_historial.get_all_records()
@@ -193,28 +193,38 @@ with tab_historial:
     if datos_historial:
         df_hist = pd.DataFrame(datos_historial)
         
-        # 1. Crear una lista de placas únicas que existen en el historial
-        placas_unicas = df_hist["Placa"].astype(str).unique().tolist()
+        # 1. Obtener listas únicas de Fechas y Placas
+        fechas_unicas = ["Todas"] + df_hist["Fecha"].astype(str).unique().tolist()
+        placas_unicas = ["Todas"] + df_hist["Placa"].astype(str).unique().tolist()
         
-        # 2. Agregar la opción para ver todo
-        opciones_filtro = ["Ver Todos"] + placas_unicas
+        # 2. Crear dos columnas para que los filtros se vean ordenados en el celular
+        col_filtro1, col_filtro2 = st.columns(2)
         
-        # 3. Crear el buscador/selector
-        seleccion_filtro = st.selectbox("🔍 Buscar historial por Placa:", opciones_filtro)
-        
+        with col_filtro1:
+            fecha_seleccionada = st.selectbox("📅 Filtrar por Fecha:", fechas_unicas)
+            
+        with col_filtro2:
+            placa_seleccionada_hist = st.selectbox("🚗 Filtrar por Placa:", placas_unicas)
+            
         st.write("---")
         
-        # 4. Filtrar los datos según lo que elija el usuario
-        if seleccion_filtro != "Ver Todos":
-            # Si elige una placa, filtramos el DataFrame para mostrar solo esa
-            df_mostrar = df_hist[df_hist["Placa"].astype(str) == seleccion_filtro]
-            st.success(f"Mostrando el historial de: {seleccion_filtro}")
-        else:
-            # Si elige "Ver Todos", mostramos la base completa
-            df_mostrar = df_hist
-            
-        # 5. Mostrar la tabla final en pantalla
-        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+        # 3. Lógica para aplicar los filtros al mismo tiempo
+        df_mostrar = df_hist.copy() # Hacemos una copia para no alterar los datos originales
         
+        # Si elige una fecha específica, filtramos
+        if fecha_seleccionada != "Todas":
+            df_mostrar = df_mostrar[df_mostrar["Fecha"].astype(str) == fecha_seleccionada]
+            
+        # Si elige una placa específica, filtramos también
+        if placa_seleccionada_hist != "Todas":
+            df_mostrar = df_mostrar[df_mostrar["Placa"].astype(str) == placa_seleccionada_hist]
+            
+        # 4. Mostrar Resultados
+        if not df_mostrar.empty:
+            st.success(f"✅ Mostrando {len(df_mostrar)} resultados encontrados.")
+            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ No se encontraron registros con esa combinación de fecha y placa.")
+            
     else:
         st.info("Aún no has archivado ningún registro al finalizar el día.")
