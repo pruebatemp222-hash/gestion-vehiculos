@@ -46,7 +46,7 @@ def conectar_sheets():
     archivo = cliente.open("Vehiculos_App")
     hoja_principal = archivo.sheet1
     
-    # Magia: Busca la pestaña "Historial". Si no existe, la crea automáticamente.
+    # Busca la pestaña "Historial". Si no existe, la crea automáticamente.
     try:
         hoja_hist = archivo.worksheet("Historial")
     except gspread.exceptions.WorksheetNotFound:
@@ -125,12 +125,10 @@ with tab_control:
                 st.rerun()
                 
         st.write("---")
-        # --- NUEVO SISTEMA DE ARCHIVADO ---
+        # --- SISTEMA DE ARCHIVADO ---
         if st.button("📦 Archivar en Historial y Cerrar Día"):
-            # 1. Obtener la fecha de hoy
             fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
             
-            # 2. Guardar todos los datos en la pestaña "Historial"
             hoja_historial.append_row([
                 fecha_actual, 
                 placa_sel, 
@@ -140,7 +138,6 @@ with tab_control:
                 vehiculo['Pago']
             ])
             
-            # 3. Limpiar el panel de control para que mañana empiece en blanco
             hoja_datos.update_cell(fila_idx, 4, "")
             hoja_datos.update_cell(fila_idx, 5, "")
             hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
@@ -185,17 +182,39 @@ with tab_gestion:
             st.rerun()
 
 # ==========================================
-# PESTAÑA 3: HISTORIAL (BASE DE DATOS DE DÍAS)
+# PESTAÑA 3: HISTORIAL POR VEHÍCULO
 # ==========================================
 with tab_historial:
-    st.subheader("📅 Historial de Días Anteriores")
+    st.subheader("📅 Historial por Vehículo")
     
-    # Traemos los datos de la nueva hoja de Historial
+    # Traemos los datos de la hoja de Historial
     datos_historial = hoja_historial.get_all_records()
     
     if datos_historial:
         df_hist = pd.DataFrame(datos_historial)
-        # Mostramos la tabla. Estará organizada por Fecha, Placa, etc.
-        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        
+        # 1. Crear una lista de placas únicas que existen en el historial
+        placas_unicas = df_hist["Placa"].astype(str).unique().tolist()
+        
+        # 2. Agregar la opción para ver todo
+        opciones_filtro = ["Ver Todos"] + placas_unicas
+        
+        # 3. Crear el buscador/selector
+        seleccion_filtro = st.selectbox("🔍 Buscar historial por Placa:", opciones_filtro)
+        
+        st.write("---")
+        
+        # 4. Filtrar los datos según lo que elija el usuario
+        if seleccion_filtro != "Ver Todos":
+            # Si elige una placa, filtramos el DataFrame para mostrar solo esa
+            df_mostrar = df_hist[df_hist["Placa"].astype(str) == seleccion_filtro]
+            st.success(f"Mostrando el historial de: {seleccion_filtro}")
+        else:
+            # Si elige "Ver Todos", mostramos la base completa
+            df_mostrar = df_hist
+            
+        # 5. Mostrar la tabla final en pantalla
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+        
     else:
         st.info("Aún no has archivado ningún registro al finalizar el día.")
