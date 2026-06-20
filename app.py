@@ -78,12 +78,9 @@ def conectar_sheets():
 
 try:
     hoja_datos, hoja_historial, hoja_abonos = conectar_sheets()
-    
-    # Asegurar existencia de la columna Tipo
     encabezados = hoja_datos.row_values(1)
     if len(encabezados) < 7 or "Tipo" not in encabezados:
         hoja_datos.update_cell(1, 7, "Tipo")
-        
 except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
@@ -117,106 +114,20 @@ mes_actual_str = datetime.now(zona_horaria).strftime("%m/%Y")
 tab_inicio, tab_control, tab_gestion, tab_pagos, tab_historial = st.tabs(["🏠 Inicio", "⏱️ Panel", "⚙️ Gestión", "💰 Pagos", "📅 Historial"])
 
 # ==========================================
-# PESTAÑA 0: INICIO (DASHBOARD FINANCIERO DE DEUDAS)
+# PESTAÑA 0: INICIO (LISTA DE CLIENTES Y REPORTES)
 # ==========================================
 with tab_inicio:
     if st.session_state.vista_inicio == 'lista':
-        st.subheader("📊 Resumen de Cuentas y Saldos Totales")
-        
-        # --- CEREBRO FINANCIERO: CALCULAR DEUDAS ACUMULADAS ---
-        try:
-            datos_h_tot = hoja_historial.get_all_records()
-            df_h_tot = pd.DataFrame(datos_h_tot) if datos_h_tot else pd.DataFrame()
-        except:
-            df_h_tot = pd.DataFrame()
-            
-        dict_tipos = dict(zip(df["Placa"], df["Tipo"])) if not df.empty else {}
-        dict_nombres = dict(zip(df["Placa"], df["Propietario"])) if not df.empty else {}
-        
-        # Inicializar contador de deudas en 0 para cada vehículo registrado
-        deudas_por_placa = {placa: {"monto": 0, "dias": 0} for placa in df["Placa"].unique()} if not df.empty else {}
-        
-        if not df_h_tot.empty and not df.empty:
-            df_h_tot['Placa'] = df_h_tot['Placa'].astype(str).str.strip()
-            df_h_tot['Pago'] = df_h_tot['Pago'].astype(str).str.strip()
-            df_h_tot['Hora de Salida'] = df_h_tot['Hora de Salida'].astype(str).str.strip()
-            
-            # Rastreador de salidas anteriores por placa para calcular penalidades pasadas de forma exacta
-            last_exit_tracker = {}
-            
-            for idx, row in df_h_tot.iterrows():
-                placa = row['Placa']
-                pago_status = row['Pago']
-                hora_salida = row['Hora de Salida']
-                tipo_v = dict_tipos.get(placa, "Moto")
-                
-                es_deuda = "Pendiente" in pago_status or "No Pagó" in pago_status
-                prev_exit = last_exit_tracker.get(placa, "")
-                
-                # Calcular tarifa correspondiente a esta fila histórica
-                if tipo_v == "Moto Lineal":
-                    tarifa_fila = 3
-                else: # Moto normal
-                    if prev_exit and len(prev_exit) == 5 and ":" in prev_exit and prev_exit >= "12:00":
-                        tarifa_fila = 4
-                    else:
-                        tarifa_fila = 3
-                
-                # Si el estado ya guardó textualmente un monto, respetamos ese monto histórico
-                if "S/. 4" in pago_status:
-                    tarifa_fila = 4
-                elif "S/. 3" in pago_status:
-                    tarifa_fila = 3
-                    
-                # Si es una deuda, la sumamos al total del cliente
-                if es_deuda:
-                    if placa in deudas_por_placa:
-                        deudas_por_placa[placa]["monto"] += tarifa_fila
-                        deudas_por_placa[placa]["dias"] += 1
-                        
-                # Actualizar la última salida conocida para la siguiente visita de esta moto
-                if hora_salida != "":
-                    last_exit_tracker[placa] = hora_salida
-                    
-        # Construir tabla visualmente atractiva de deudores
-        lista_deudas_visual = []
-        monto_total_cochera = 0
-        clientes_morosos = 0
-        
-        for placa, info in deudas_por_placa.items():
-            if info["monto"] > 0:
-                lista_deudas_visual.append({
-                    "Propietario": dict_nombres.get(placa, "Desconocido"),
-                    "Placa": placa,
-                    "Tipo de Vehículo": dict_tipos.get(placa, "Moto"),
-                    "Días Debidos 🗓️": info["dias"],
-                    "Monto Total Pendiente 💰": f"S/. {info['monto']:.2f}"
-                })
-                monto_total_cochera += info["monto"]
-                clientes_morosos += 1
-                
-        # Mostrar Indicadores Rápidos (KPIs formales)
-        col_kpi1, col_kpi2 = st.columns(2)
-        with col_kpi1:
-            st.metric("🔴 Total por Cobrar (Cochera)", f"S/. {monto_total_cochera:.2f}", delta=f"{clientes_morosos} Clientes debiendo", delta_color="inverse")
-        with col_kpi2:
-            st.metric("🏍️ Vehículos con Deuda", f"{clientes_morosos} Motos")
-            
-        if lista_deudas_visual:
-            st.markdown("#### 📋 Detalle de Cuentas por Cobrar")
-            st.dataframe(pd.DataFrame(lista_deudas_visual), use_container_width=True, hide_index=True)
-        else:
-            st.success("✅ ¡Excelente! No hay deudas pendientes en el sistema actualmente.")
-            
-        st.write("---")
         st.markdown("### 👥 Lista Completa de Clientes")
         
         if not df.empty:
             for idx, row in df.iterrows():
+                estado_hoy = row['Pago'] if row['Pago'] else 'Sin Ingreso'
+                
                 st.markdown(f"""
                 <div class="tarjeta-resumen">
                     <h4 style='margin:0; color:#333;'>👤 {row['Propietario']} <span style='font-size:12px; color:#777;'>({row['Tipo']})</span></h4>
-                    <p style='margin:0; color:#666;'>🚗 Placa: {row['Placa']} | Estado Hoy: {row['Pago'] if row['Pago'] else 'Sin Ingreso'}</p>
+                    <p style='margin:0; color:#666;'>🚗 Placa: {row['Placa']} | Estado Hoy: {estado_hoy}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -240,11 +151,14 @@ with tab_inicio:
         if not filtro_vehiculo.empty:
             vehiculo_det = filtro_vehiculo.iloc[0]
             propietario_nombre = vehiculo_det['Propietario']
+            tipo_vehiculo = vehiculo_det.get("Tipo", "Moto")
         else:
             propietario_nombre = "Usuario"
+            tipo_vehiculo = "Moto"
             
         st.subheader(f"Reporte: {propietario_nombre} ({placa_det})")
         
+        # --- LÓGICA DE DEUDA HISTÓRICA ACUMULADA ---
         try:
             datos_hist_total = hoja_historial.get_all_records()
             df_hist_total = pd.DataFrame(datos_hist_total) if datos_hist_total else pd.DataFrame()
@@ -259,13 +173,70 @@ with tab_inicio:
         else:
             df_vehiculo = pd.DataFrame()
 
+        # Calcular la deuda total acumulada leyendo cada registro del vehículo en la historia
+        deuda_total_acumulada = 0
+        dias_con_deuda = 0
+        ultima_salida_hist = ""
+
+        if not df_vehiculo.empty:
+            for idx, row in df_vehiculo.iterrows():
+                pago_status = str(row['Pago']).strip()
+                hora_salida = str(row['Hora de Salida']).strip()
+                
+                es_deuda = "Pendiente" in pago_status or "No Pagó" in pago_status
+                
+                # Calcular la tarifa del día específico
+                if tipo_vehiculo == "Moto Lineal":
+                    tarifa_dia = 3
+                else: # Es Moto normal
+                    if ultima_salida_hist and len(ultima_salida_hist) == 5 and ":" in ultima_salida_hist and ultima_salida_hist >= "12:00":
+                        tarifa_dia = 4
+                    else:
+                        tarifa_dia = 3
+                
+                # Si el pago ya tiene el monto registrado en el texto, respetamos el historial
+                if "S/. 4" in pago_status:
+                    tarifa_dia = 4
+                elif "S/. 3" in pago_status:
+                    tarifa_dia = 3
+                
+                # Si no pagó, sumamos la deuda
+                if es_deuda:
+                    deuda_total_acumulada += tarifa_dia
+                    dias_con_deuda += 1
+                
+                # Actualizar última salida para el cálculo del siguiente día que asista
+                if hora_salida:
+                    ultima_salida_hist = hora_salida
+
+        # --- MOSTRAR LA DEUDA TOTAL EN UN BANNER ---
+        if deuda_total_acumulada > 0:
+            st.markdown(f"""
+            <div style='background-color: #fff3cd; padding: 20px; border-radius: 12px; border-left: 6px solid #ffc107; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);'>
+                <h3 style='margin:0; color: #856404; font-size: 22px;'>💰 Deuda Total Acumulada: S/. {deuda_total_acumulada:.2f}</h3>
+                <p style='margin:5px 0 0 0; color: #856404; font-size: 15px;'>
+                    Según el historial, este vehículo debe un total de <b>{dias_con_deuda} días</b> de asistencias anteriores. <br>
+                    <small><i>(Los días que no asistió no se contabilizan).</i></small>
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style='background-color: #d4edda; padding: 15px; border-radius: 12px; border-left: 6px solid #28a745; margin-bottom: 25px;'>
+                <h3 style='margin:0; color: #155724; font-size: 18px;'>✅ Todo al día</h3>
+                <p style='margin:5px 0 0 0; color: #155724;'>Este vehículo no registra deudas en su historial completo.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # --- REPORTE MENSUAL VISUAL ---
         opciones_meses = [mes_actual_str]
         if not df_vehiculo.empty:
             df_vehiculo["Mes_Anio"] = pd.to_datetime(df_vehiculo["Fecha"], format="%d/%m/%Y", errors="coerce").dt.strftime("%m/%Y")
             meses_historial = df_vehiculo["Mes_Anio"].dropna().unique().tolist()
             opciones_meses = sorted(list(set(opciones_meses + meses_historial)), reverse=True)
             
-        mes_seleccionado = st.selectbox("📅 Selecciona el Mes a Evaluar:", opciones_meses)
+        st.write("🗓️ **Selecciona el Mes a Evaluar:**")
+        mes_seleccionado = st.selectbox("", opciones_meses, label_visibility="collapsed")
         st.write("---")
         
         mes, anio = mes_seleccionado.split("/")
