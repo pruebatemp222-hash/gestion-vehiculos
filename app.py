@@ -33,7 +33,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🅿️ Control de Parqueo")
+st.title("🅿️ Control de Cochera")
 
 # --- 2. Conexión a Base de Datos (Con Historial y Abonos) ---
 @st.cache_resource
