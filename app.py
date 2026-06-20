@@ -33,7 +33,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🅿️ Control de Cochera")
+st.title("🅿️ Control de Parqueo")
 
 # --- 2. Conexión a Base de Datos (Con Historial y Abonos) ---
 @st.cache_resource
@@ -98,14 +98,18 @@ with tab_control:
     st.subheader("Control en Vivo")
     
     if not df.empty:
-        lista_placas = df["Placa"].astype(str).tolist()
-        placa_sel = st.selectbox("🔍 Selecciona un Vehículo:", lista_placas, key="panel_placa")
+        # Creamos una columna combinada para buscar de manera amigable por Propietario
+        df['Buscar_Propietario'] = df["Propietario"].astype(str) + " — " + df["Placa"].astype(str)
+        lista_propietarios = df["Buscar_Propietario"].tolist()
         
-        vehiculos_filtrados = df[df["Placa"].astype(str) == placa_sel]
+        propietario_sel = st.selectbox("🔍 Selecciona un Propietario:", lista_propietarios, key="panel_propietario")
+        
+        vehiculos_filtrados = df[df["Buscar_Propietario"] == propietario_sel]
         
         if not vehiculos_filtrados.empty:
             vehiculo = vehiculos_filtrados.iloc[0]
-            fila_idx = df.index[df['Placa'].astype(str) == placa_sel].tolist()[0] + 2
+            placa_sel = vehiculo['Placa']
+            fila_idx = df.index[df['Buscar_Propietario'] == propietario_sel].tolist()[0] + 2
             
             st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel}")
             
@@ -188,11 +192,12 @@ with tab_gestion:
     st.write("---")
     st.subheader("Eliminar Registro")
     if not df.empty:
-        placa_eliminar = st.selectbox("Seleccionar Placa para Borrar:", df["Placa"].astype(str).tolist())
+        df['Buscar_Propietario'] = df["Propietario"].astype(str) + " — " + df["Placa"].astype(str)
+        prop_eliminar = st.selectbox("Seleccionar Propietario para Borrar:", df["Buscar_Propietario"].tolist())
         if st.button("Eliminar Vehículo 🗑️"):
-            f_idx = df.index[df['Placa'].astype(str) == placa_eliminar].tolist()[0] + 2
+            f_idx = df.index[df['Buscar_Propietario'] == prop_eliminar].tolist()[0] + 2
             hoja_datos.delete_rows(f_idx)
-            st.success("Vehículo eliminado.")
+            st.success("Vehículo eliminado correctamente.")
             time.sleep(1)
             st.rerun()
 
@@ -203,11 +208,12 @@ with tab_pagos:
     st.subheader("Registrar Abonos Adelantados o Atrasados")
     
     if not df.empty:
+        df['Buscar_Propietario'] = df["Propietario"].astype(str) + " — " + df["Placa"].astype(str)
+        
         with st.form("form_pagos", clear_on_submit=True):
-            placa_pago = st.selectbox("🚗 Vehículo:", df["Placa"].astype(str).tolist())
+            propietario_pago_sel = st.selectbox("👤 Propietario:", df["Buscar_Propietario"].tolist())
             
             st.write("📅 **Selecciona los días a pagar:**")
-            # Selector de fechas (permite escoger un rango si haces doble clic, o un solo día)
             fechas_pago = st.date_input("Haz clic para elegir Inicio y Fin (o un solo día):", value=[], format="DD/MM/YYYY")
             
             monto = st.number_input("💰 Monto Pagado:", min_value=0.0, step=1.0, format="%.2f")
@@ -215,23 +221,19 @@ with tab_pagos:
             if st.form_submit_button("Registrar Pago Múltiple 💵"):
                 descripcion_generada = ""
                 
-                # Lógica para procesar la selección del calendario
                 if isinstance(fechas_pago, tuple) or isinstance(fechas_pago, list):
                     if len(fechas_pago) == 2:
-                        # Rango de fechas (Ej: Del 10/06/2026 al 15/06/2026)
                         dias_total = (fechas_pago[1] - fechas_pago[0]).days + 1
                         descripcion_generada = f"Del {fechas_pago[0].strftime('%d/%m/%Y')} al {fechas_pago[1].strftime('%d/%m/%Y')} ({dias_total} días)"
                     elif len(fechas_pago) == 1:
-                        # Un solo día
                         descripcion_generada = f"Día: {fechas_pago[0].strftime('%d/%m/%Y')}"
                 elif fechas_pago:
-                    # Alternativa si Streamlit devuelve un solo objeto 'date'
                     descripcion_generada = f"Día: {fechas_pago.strftime('%d/%m/%Y')}"
 
                 if descripcion_generada and monto > 0:
-                    propietario_pago = df[df["Placa"].astype(str) == placa_pago].iloc[0]["Propietario"]
-                    hoja_abonos.append_row([fecha_actual, placa_pago, propietario_pago, descripcion_generada, monto])
-                    st.success(f"✅ Pago de S/{monto} registrado a {placa_pago}. Guardado como: {descripcion_generada}")
+                    vehiculo_sel = df[df["Buscar_Propietario"] == propietario_pago_sel].iloc[0]
+                    hoja_abonos.append_row([fecha_actual, vehiculo_sel["Placa"], vehiculo_sel["Propietario"], descripcion_generada, monto])
+                    st.success(f"✅ Pago de S/{monto} registrado a {vehiculo_sel['Propietario']}.")
                     time.sleep(1.5)
                     st.rerun()
                 else:
@@ -249,13 +251,11 @@ with tab_pagos:
             df_abonos = pd.DataFrame(datos_abonos)
             st.dataframe(df_abonos, use_container_width=True)
             
-            # Formatear la lista para mostrar la fila exacta, placa y monto
-            lista_opciones_abono = [f"Fila {idx + 2} | {row['Fecha']} - {row['Placa']} - S/{row['Monto Pagado']}" for idx, row in df_abonos.iterrows()]
+            lista_opciones_abono = [f"Fila {idx + 2} | {row['Fecha']} - {row['Propietario']} ({row['Placa']}) - S/{row['Monto Pagado']}" for idx, row in df_abonos.iterrows()]
             
             abono_a_eliminar = st.selectbox("Selecciona el pago que deseas anular:", lista_opciones_abono)
             
             if st.button("❌ Eliminar Este Pago"):
-                # Extraemos el número exacto de la fila a borrar
                 fila_abono_idx = int(abono_a_eliminar.split("|")[0].replace("Fila", "").strip())
                 hoja_abonos.delete_rows(fila_abono_idx)
                 st.success("✅ Pago eliminado correctamente de la base de datos.")
@@ -281,7 +281,7 @@ with tab_historial:
         df_hist = pd.DataFrame(datos_historial)
         
         fechas_unicas = ["Todas"] + df_hist["Fecha"].astype(str).unique().tolist()
-        placas_unicas = ["Todas"] + df_hist["Placa"].astype(str).unique().tolist()
+        propietarios_unicos = ["Todas"] + df_hist["Propietario"].astype(str).unique().tolist()
         
         col_filtro1, col_filtro2 = st.columns(2)
         
@@ -289,7 +289,7 @@ with tab_historial:
             fecha_seleccionada = st.selectbox("📅 Filtrar por Fecha:", fechas_unicas)
             
         with col_filtro2:
-            placa_seleccionada_hist = st.selectbox("🚗 Filtrar por Placa:", placas_unicas, key="hist_placa")
+            prop_seleccionado_hist = st.selectbox("👤 Filtrar por Propietario:", propietarios_unicos, key="hist_prop")
             
         st.write("---")
         
@@ -298,8 +298,8 @@ with tab_historial:
         if fecha_seleccionada != "Todas":
             df_mostrar = df_mostrar[df_mostrar["Fecha"].astype(str) == fecha_seleccionada]
             
-        if placa_seleccionada_hist != "Todas":
-            df_mostrar = df_mostrar[df_mostrar["Placa"].astype(str) == placa_seleccionada_hist]
+        if prop_seleccionado_hist != "Todas":
+            df_mostrar = df_mostrar[df_mostrar["Propietario"].astype(str) == prop_seleccionado_hist]
             
         if not df_mostrar.empty:
             st.success(f"✅ Mostrando {len(df_mostrar)} resultados encontrados.")
