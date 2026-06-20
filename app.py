@@ -6,7 +6,7 @@ from datetime import datetime
 import time 
 import pytz
 import calendar
-import plotly.express as px  # <-- NUEVA LIBRERÍA DE GRÁFICOS PRO
+import plotly.express as px
 
 # --- 1. Configuración Profesional de la página ---
 st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_icon="🅿️")
@@ -38,7 +38,6 @@ st.markdown("""
         border-radius: 10px;
         font-weight: 600;
     }
-    /* Estilo para las tarjetas de resumen */
     .tarjeta-resumen {
         background-color: #ffffff;
         padding: 15px;
@@ -83,7 +82,7 @@ except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
 
-# --- BLINDAJE CONTRA ERRORES DE LECTURA ---
+# --- BLINDAJE Y LIMPIEZA GLOBAL DE DATOS ---
 try:
     datos = hoja_datos.get_all_records()
 except Exception:
@@ -95,6 +94,12 @@ if datos:
         if col not in df.columns:
             df[col] = ""
     df.fillna("", inplace=True)
+    
+    # Limpieza automática de espacios invisibles para evitar IndexErrors
+    if "Placa" in df.columns:
+        df["Placa"] = df["Placa"].astype(str).str.strip()
+    if "Propietario" in df.columns:
+        df["Propietario"] = df["Propietario"].astype(str).str.strip()
 else:
     df = pd.DataFrame()
 
@@ -104,15 +109,13 @@ hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
 fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
 mes_actual_str = datetime.now(zona_horaria).strftime("%m/%Y")
 
-# --- 3. Interfaz de Usuario ---
+# --- 3. Interfaz de Usuario (Tabs) ---
 tab_inicio, tab_control, tab_gestion, tab_pagos, tab_historial = st.tabs(["🏠 Inicio", "⏱️ Panel", "⚙️ Gestión", "💰 Pagos", "📅 Historial"])
 
 # ==========================================
-# PESTAÑA 0: INICIO (DASHBOARD Y REPORTE MENSUAL)
+# PESTAÑA 0: INICIO (DASHBOARD)
 # ==========================================
 with tab_inicio:
-    
-    # VISTA 1: Lista Resumida de Vehículos
     if st.session_state.vista_inicio == 'lista':
         st.subheader("📊 Resumen de Clientes")
         if not df.empty:
@@ -132,26 +135,37 @@ with tab_inicio:
         else:
             st.info("No hay vehículos registrados en el sistema.")
 
-    # VISTA 2: Perfil y Reporte Detallado con Gráficos
     elif st.session_state.vista_inicio == 'detalle':
         if st.button("⬅️ Volver al Resumen General"):
             st.session_state.vista_inicio = 'lista'
             st.session_state.vehiculo_detalle = None
             st.rerun()
             
-        placa_det = st.session_state.vehiculo_detalle
-        vehiculo_det = df[df["Placa"].astype(str) == placa_det].iloc[0]
+        # Control estricto contra IndexErrors y espacios huérfanos
+        placa_det = str(st.session_state.vehiculo_detalle).strip()
+        filtro_vehiculo = df[df["Placa"] == placa_det] if not df.empty else pd.DataFrame()
         
-        st.subheader(f"Reporte: {vehiculo_det['Propietario']} ({placa_det})")
+        if not filtro_vehiculo.empty:
+            vehiculo_det = filtro_vehiculo.iloc[0]
+            propietario_nombre = vehiculo_det['Propietario']
+        else:
+            propietario_nombre = "Usuario"
+            
+        st.subheader(f"Reporte: {propietario_nombre} ({placa_det})")
         
         try:
             datos_hist_total = hoja_historial.get_all_records()
             df_hist_total = pd.DataFrame(datos_hist_total) if datos_hist_total else pd.DataFrame()
+            if not df_hist_total.empty:
+                if "Placa" in df_hist_total.columns:
+                    df_hist_total["Placa"] = df_hist_total["Placa"].astype(str).str.strip()
+                if "Fecha" in df_hist_total.columns:
+                    df_hist_total["Fecha"] = df_hist_total["Fecha"].astype(str).str.strip()
         except:
             df_hist_total = pd.DataFrame()
 
         if not df_hist_total.empty:
-            df_vehiculo = df_hist_total[df_hist_total["Placa"].astype(str) == placa_det]
+            df_vehiculo = df_hist_total[df_hist_total["Placa"] == placa_det]
         else:
             df_vehiculo = pd.DataFrame()
 
@@ -197,15 +211,13 @@ with tab_inicio:
                 reporte_mensual.append({"Fecha": fecha_str, "Asistencia": "No vino ⚪", "Estado": "-"})
                 faltas += 1
                 
-        # --- MÉTRICAS SUPERIORES ---
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("✅ Días Pagados", pagados)
         col_m2.metric("❌ Deudas/Pendientes", deudas)
         col_m3.metric("⚪ Días que No Vino", faltas)
         st.write("---")
         
-        # --- DIVISIÓN DE PANTALLA: TABLA (IZQ) Y GRÁFICO (DER) ---
-        col_tabla, col_grafico = st.columns([1.5, 1.2]) # La tabla ocupa un poco más de espacio
+        col_tabla, col_grafico = st.columns([1.5, 1.2]) 
         
         with col_tabla:
             st.write("📄 **Registro Detallado**")
@@ -213,40 +225,35 @@ with tab_inicio:
             
         with col_grafico:
             st.write("📊 **Distribución Mensual**")
-            # Preparar datos para el gráfico
             datos_grafico = pd.DataFrame({
                 "Estado": ["Pagado", "Deuda", "Faltas"],
                 "Días": [pagados, deudas, faltas]
             })
-            # Filtrar los valores en 0 para que el gráfico no se vea vacío o deforme
             datos_grafico = datos_grafico[datos_grafico["Días"] > 0]
             
             if not datos_grafico.empty:
-                # Crear gráfico de Dona con Plotly
                 fig = px.pie(
                     datos_grafico, 
                     values="Días", 
                     names="Estado", 
-                    hole=0.45, # Esto lo hace ver como una dona
+                    hole=0.45, 
                     color="Estado",
                     color_discrete_map={
-                        "Pagado": "#198754", # Verde
-                        "Deuda": "#dc3545",  # Rojo
-                        "Faltas": "#adb5bd"  # Gris
+                        "Pagado": "#198754", 
+                        "Deuda": "#dc3545",  
+                        "Faltas": "#adb5bd"  
                     }
                 )
-                # Ocultar márgenes innecesarios y poner la leyenda abajo
                 fig.update_layout(
                     margin=dict(t=20, b=20, l=0, r=0), 
                     legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
                 )
-                # Mostrar gráfico interactivo
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("Aún no hay datos para graficar este mes.")
 
 # ==========================================
-# PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS
+# PESTAÑA 1: PANEL DE ASISTENCIA (SINCRONIZADO)
 # ==========================================
 with tab_control:
     st.subheader("Control en Vivo")
@@ -285,7 +292,10 @@ with tab_control:
                     hoja_datos.update_cell(fila_idx, 4, hora_actual)
                     hoja_datos.update_cell(fila_idx, 5, "")
                     hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
+                    
+                    # Crea registro nuevo únicamente al marcar Ingreso
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], hora_actual, "", "Pendiente 🔴"])
+                    
                     st.success(f"✅ Ingreso actualizado.")
                     time.sleep(1)
                     st.rerun()
@@ -293,7 +303,24 @@ with tab_control:
             with col2:
                 if st.button("🔴 Salida", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 5, hora_actual)
-                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, vehiculo['Pago']])
+                    
+                    try:
+                        datos_h = hoja_historial.get_all_records()
+                        df_h = pd.DataFrame(datos_h) if datos_h else pd.DataFrame()
+                        if not df_h.empty:
+                            df_h['Fecha'] = df_h['Fecha'].astype(str).str.strip()
+                            df_h['Placa'] = df_h['Placa'].astype(str).str.strip()
+                            filtro = (df_h['Fecha'] == fecha_actual) & (df_h['Placa'] == str(placa_sel).strip())
+                            
+                            if not df_h[filtro].empty:
+                                last_idx = df_h.index[filtro].tolist()[-1] + 2
+                                hoja_historial.update_cell(last_idx, 5, hora_actual)
+                            else:
+                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, vehiculo['Pago']])
+                        else:
+                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, vehiculo['Pago']])
+                    except: pass
+                    
                     st.success(f"✅ Salida actualizada.")
                     time.sleep(1)
                     st.rerun()
@@ -301,7 +328,24 @@ with tab_control:
             with col3:
                 if st.button("💵 Pagó", type="primary", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
-                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
+                    
+                    try:
+                        datos_h = hoja_historial.get_all_records()
+                        df_h = pd.DataFrame(datos_h) if datos_h else pd.DataFrame()
+                        if not df_h.empty:
+                            df_h['Fecha'] = df_h['Fecha'].astype(str).str.strip()
+                            df_h['Placa'] = df_h['Placa'].astype(str).str.strip()
+                            filtro = (df_h['Fecha'] == fecha_actual) & (df_h['Placa'] == str(placa_sel).strip())
+                            
+                            if not df_h[filtro].empty:
+                                last_idx = df_h.index[filtro].tolist()[-1] + 2
+                                hoja_historial.update_cell(last_idx, 6, "Pagado ✅")
+                            else:
+                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
+                        else:
+                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
+                    except: pass
+                    
                     st.success("✅ Pago registrado.")
                     time.sleep(1)
                     st.rerun()
@@ -309,7 +353,24 @@ with tab_control:
             with col4:
                 if st.button("❌ No Pagó", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "No Pagó ❌")
-                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
+                    
+                    try:
+                        datos_h = hoja_historial.get_all_records()
+                        df_h = pd.DataFrame(datos_h) if datos_h else pd.DataFrame()
+                        if not df_h.empty:
+                            df_h['Fecha'] = df_h['Fecha'].astype(str).str.strip()
+                            df_h['Placa'] = df_h['Placa'].astype(str).str.strip()
+                            filtro = (df_h['Fecha'] == fecha_actual) & (df_h['Placa'] == str(placa_sel).strip())
+                            
+                            if not df_h[filtro].empty:
+                                last_idx = df_h.index[filtro].tolist()[-1] + 2
+                                hoja_historial.update_cell(last_idx, 6, "No Pagó ❌")
+                            else:
+                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
+                        else:
+                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
+                    except: pass
+                    
                     st.error("❌ Deuda registrada.")
                     time.sleep(1)
                     st.rerun()
@@ -415,8 +476,14 @@ with tab_historial:
     
     if datos_historial:
         df_hist = pd.DataFrame(datos_historial)
-        fechas_unicas = ["Todas"] + df_hist["Fecha"].astype(str).unique().tolist()
-        propietarios_unicos = ["Todas"] + df_hist["Propietario"].astype(str).unique().tolist()
+        
+        # Limpieza de espacios en filtros del historial para máxima estabilidad
+        for c in ["Fecha", "Placa", "Propietario"]:
+            if c in df_hist.columns:
+                df_hist[c] = df_hist[c].astype(str).str.strip()
+                
+        fechas_unicas = ["Todas"] + df_hist["Fecha"].unique().tolist()
+        propietarios_unicos = ["Todas"] + df_hist["Propietario"].unique().tolist()
         
         col_filtro1, col_filtro2 = st.columns(2)
         with col_filtro1:
@@ -426,9 +493,9 @@ with tab_historial:
             
         df_mostrar = df_hist.copy() 
         if fecha_seleccionada != "Todas":
-            df_mostrar = df_mostrar[df_mostrar["Fecha"].astype(str) == fecha_seleccionada]
+            df_mostrar = df_mostrar[df_mostrar["Fecha"] == fecha_seleccionada]
         if prop_seleccionado_hist != "Todas":
-            df_mostrar = df_mostrar[df_mostrar["Propietario"].astype(str) == prop_seleccionado_hist]
+            df_mostrar = df_mostrar[df_mostrar["Propietario"] == prop_seleccionado_hist]
             
         if not df_mostrar.empty:
             st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
