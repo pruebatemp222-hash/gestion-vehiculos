@@ -72,7 +72,7 @@ def conectar_sheets():
         hoja_abonos = archivo.worksheet("Abonos")
     except gspread.exceptions.WorksheetNotFound:
         hoja_abonos = archivo.add_worksheet(title="Abonos", rows="1000", cols="5")
-        hoja_abonos.add_worksheet.append_row(["Fecha", "Placa", "Propietario", "Descripción del Periodo", "Monto Pagado"])
+        hoja_abonos.append_row(["Fecha", "Placa", "Propietario", "Descripción del Periodo", "Monto Pagado"])
         
     return hoja_principal, hoja_hist, hoja_abonos
 
@@ -170,10 +170,12 @@ with tab_inicio:
 
         if not df_hist_total.empty:
             df_vehiculo = df_hist_total[df_hist_total["Placa"] == placa_det]
+            # SOLUCIÓN DE DUPLICADOS: Nos quedamos solo con el último estado registrado por cada día para evitar contar deudas dobles.
+            df_vehiculo = df_vehiculo.drop_duplicates(subset=["Fecha"], keep="last")
         else:
             df_vehiculo = pd.DataFrame()
 
-        # Calcular la deuda total acumulada leyendo cada registro del vehículo en la historia
+        # Calcular la deuda total acumulada leyendo el historial filtrado
         deuda_total_acumulada = 0
         dias_con_deuda = 0
         ultima_salida_hist = ""
