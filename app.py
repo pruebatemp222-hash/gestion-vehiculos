@@ -78,6 +78,13 @@ def conectar_sheets():
 
 try:
     hoja_datos, hoja_historial, hoja_abonos = conectar_sheets()
+    
+    # --- ARREGLO DEL BUG DE LA COLUMNA OCULTA ---
+    # Esto fuerza a Google Sheets a leer la columna 7 correctamente creando el título "Tipo"
+    encabezados = hoja_datos.row_values(1)
+    if len(encabezados) < 7 or "Tipo" not in encabezados:
+        hoja_datos.update_cell(1, 7, "Tipo")
+        
 except Exception as e:
     st.error(f"❌ Error de conexión: {e}")
     st.stop()
@@ -90,20 +97,19 @@ except Exception:
 
 if datos:
     df = pd.DataFrame(datos)
-    # Agregamos soporte para la columna 'Tipo' de forma retrocompatible
     for col in ["Hora de Ingreso", "Hora de Salida", "Pago", "Tipo"]:
         if col not in df.columns:
             df[col] = ""
     df.fillna("", inplace=True)
     
-    # Limpieza automática de espacios invisibles
+    # Limpieza automática de espacios
     if "Placa" in df.columns:
         df["Placa"] = df["Placa"].astype(str).str.strip()
     if "Propietario" in df.columns:
         df["Propietario"] = df["Propietario"].astype(str).str.strip()
         
-    # Si la columna Tipo está vacía para registros antiguos, asumimos que es Auto
-    df["Tipo"] = df["Tipo"].replace("", "Auto")
+    # Obligamos a que todo sea "Moto" o "Moto Lineal" (Convierte los 'Auto' fantasmas a 'Moto')
+    df["Tipo"] = df["Tipo"].apply(lambda x: x if x in ["Moto", "Moto Lineal"] else "Moto")
 else:
     df = pd.DataFrame()
 
@@ -256,7 +262,7 @@ with tab_inicio:
                 st.info("Aún no hay datos para graficar este mes.")
 
 # ==========================================
-# PESTAÑA 1: PANEL DE ASISTENCIA (CON INTELIGENCIA DE COSTOS PARA MOTOS)
+# PESTAÑA 1: PANEL DE ASISTENCIA (LÓGICA DE COBROS INTELIGENTE)
 # ==========================================
 with tab_control:
     st.subheader("Control en Vivo")
@@ -271,16 +277,17 @@ with tab_control:
         if not vehiculos_filtrados.empty:
             vehiculo = vehiculos_filtrados.iloc[0]
             placa_sel = vehiculo['Placa']
-            tipo_v = vehiculo.get("Tipo", "Auto")
+            tipo_v = vehiculo.get("Tipo", "Moto") # Por defecto Moto si no encuentra
             fila_idx = df.index[df['Buscar_Propietario'] == propietario_sel].tolist()[0] + 2
             
             st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel} | 📂 **Tipo:** {tipo_v}")
             
-            # --- CEREBRO: LÓGICA DE TARIFAS DE MOTO ---
-            tarifa_moto = 3
+            # --- CEREBRO: LÓGICA DE TARIFAS DE MOTOS ---
+            tarifa = 3
             tiene_recargo = False
             ultima_salida_hora = ""
             
+            # Solo aplica la regla de las 12:00 para la "Moto" normal
             if tipo_v == "Moto":
                 try:
                     datos_h = hoja_historial.get_all_records()
@@ -289,13 +296,12 @@ with tab_control:
                         df_h['Placa'] = df_h['Placa'].astype(str).str.strip()
                         df_h['Hora de Salida'] = df_h['Hora de Salida'].astype(str).str.strip()
                         
-                        # Buscamos registros históricos de esta moto que tengan una Salida válida ya guardada
                         df_moto_hist = df_h[(df_h['Placa'] == str(placa_sel).strip()) & (df_h['Hora de Salida'] != "")]
                         if not df_moto_hist.empty:
                             ultima_salida_hora = df_moto_hist.iloc[-1]['Hora de Salida']
-                            # Si tiene formato correcto HH:MM y pasa de las 12:00
-                            if len(ultima_salida_hora) == 5 and ":" in ultima_salida_hora and ultima_salida_hora > "12:00":
-                                tarifa_moto = 4
+                            # Si salió después de las 12:00 PM, se cobra 4
+                            if len(ultima_salida_hora) == 5 and ":" in ultima_salida_hora and ultima_salida_hora >= "12:00":
+                                tarifa = 4
                                 tiene_recargo = True
                 except:
                     pass
@@ -307,12 +313,12 @@ with tab_control:
             
             st.write("---")
             
-            # --- VISUALIZACIÓN EN VIVO DE CUÁNTO DEBE (SOLO PARA MOTOS) ---
+            # --- VISUALIZACIÓN DE ALERTA DE COBROS ---
             if tipo_v == "Moto":
                 if tiene_recargo:
                     st.markdown(f"""
                     <div style="background-color: #fff3cd; padding: 15px; border-radius: 12px; border-left: 5px solid #ffc107; margin-bottom: 15px;">
-                        <h4 style="margin:0; color: #856404; font-size:16px;">🛵 Control de Tarifa (Moto Lineal)</h4>
+                        <h4 style="margin:0; color: #856404; font-size:16px;">🛺 Control de Tarifa (Moto)</h4>
                         <p style="margin:5px 0 0 0; font-size:16px; color:#333;"><b>Monto a pagar hoy: <span style="color:#dc3545; font-size:22px;">S/. 4.00</span></b></p>
                         <p style="margin:4px 0 0 0; font-size:13px; color: #666;">⚠️ Se aplica <b>S/. 1.00 de recargo</b> porque en su última visita retiró la moto a las <b>{ultima_salida_hora}</b> (pasado el mediodía).</p>
                     </div>
@@ -320,12 +326,21 @@ with tab_control:
                 else:
                     st.markdown(f"""
                     <div style="background-color: #d4edda; padding: 15px; border-radius: 12px; border-left: 5px solid #28a745; margin-bottom: 15px;">
-                        <h4 style="margin:0; color: #155724; font-size:16px;">🛵 Control de Tarifa (Moto Lineal)</h4>
+                        <h4 style="margin:0; color: #155724; font-size:16px;">🛺 Control de Tarifa (Moto)</h4>
                         <p style="margin:5px 0 0 0; font-size:16px; color:#333;"><b>Monto a pagar hoy: <span style="color:#28a745; font-size:22px;">S/. 3.00</span></b></p>
-                        <p style="margin:4px 0 0 0; font-size:13px; color: #555;">✅ Tarifa regular aplicada. Salió a tiempo en su última visita (o es nuevo).</p>
+                        <p style="margin:4px 0 0 0; font-size:13px; color: #555;">✅ Tarifa regular. Salió a tiempo en su última visita o es cliente nuevo.</p>
                     </div>
                     """, unsafe_allow_html=True)
+            elif tipo_v == "Moto Lineal":
+                st.markdown(f"""
+                <div style="background-color: #d1ecf1; padding: 15px; border-radius: 12px; border-left: 5px solid #17a2b8; margin-bottom: 15px;">
+                    <h4 style="margin:0; color: #0c5460; font-size:16px;">🏍️ Control de Tarifa (Moto Lineal)</h4>
+                    <p style="margin:5px 0 0 0; font-size:16px; color:#333;"><b>Monto a pagar hoy: <span style="color:#17a2b8; font-size:22px;">S/. 3.00</span></b></p>
+                    <p style="margin:4px 0 0 0; font-size:13px; color: #555;">✅ Las motos lineales tienen tarifa fija sin importar hora de salida.</p>
+                </div>
+                """, unsafe_allow_html=True)
 
+            # Recordatorios de pago pendiente
             if vehiculo["Hora de Ingreso"] != "" and "Pendiente" in str(vehiculo["Pago"]):
                 st.warning("⚠️ RECORDATORIO: Este vehículo aún tiene un PAGO PENDIENTE.")
             elif "No Pagó" in str(vehiculo["Pago"]):
@@ -334,9 +349,9 @@ with tab_control:
             col1, col2 = st.columns(2)
             col3, col4 = st.columns(2)
             
-            # Dinamizamos los textos de guardado para las motos
-            texto_pago_guardar = f"Pagado (S/. {tarifa_moto}) ✅" if tipo_v == "Moto" else "Pagado ✅"
-            texto_deuda_guardar = f"No Pagó (S/. {tarifa_moto}) ❌" if tipo_v == "Moto" else "No Pagó ❌"
+            # Dinamizamos el texto del botón para que guarde el monto en el historial
+            texto_pago_guardar = f"Pagado (S/. {tarifa}) ✅"
+            texto_deuda_guardar = f"No Pagó (S/. {tarifa}) ❌"
             
             with col1:
                 if st.button("🟢 Ingreso", use_container_width=True):
@@ -430,14 +445,14 @@ with tab_control:
         st.warning("Agrega un vehículo en 'Gestión'.")
 
 # ==========================================
-# PESTAÑA 2: GESTIÓN (AGREGAR CON SELECCIÓN DE TIPO / ELIMINAR)
+# PESTAÑA 2: GESTIÓN (SOLO MOTO Y MOTO LINEAL)
 # ==========================================
 with tab_gestion:
     st.subheader("Registrar Nuevo Vehículo")
     with st.form("form_nuevo", clear_on_submit=True):
         n_placa = st.text_input("Placa:").strip()
         n_prop = st.text_input("Propietario:").strip()
-        n_tipo = st.selectbox("Tipo de Vehículo:", ["Auto", "Moto"]) # Selector añadido para la regla
+        n_tipo = st.selectbox("Tipo de Vehículo:", ["Moto", "Moto Lineal"]) # Exactamente tus dos opciones
         
         if st.form_submit_button("Guardar Vehículo ➕"):
             if n_placa and n_prop:
@@ -445,9 +460,8 @@ with tab_gestion:
                     st.error("⚠️ La placa ya existe.")
                 else:
                     nuevo_n = len(datos) + 1 if datos else 1
-                    # Añade el registro incluyendo la columna 'Tipo' al final de la fila
                     hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente 🔴", n_tipo])
-                    st.success("✅ Vehículo guardado.")
+                    st.success("✅ Vehículo guardado correctamente.")
                     time.sleep(1)
                     st.rerun()
             else:
