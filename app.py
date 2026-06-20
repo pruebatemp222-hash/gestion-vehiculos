@@ -5,9 +5,16 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 import time 
 import pytz
+import calendar
 
 # --- 1. Configuración Profesional de la página ---
 st.set_page_config(page_title="Gestión de Cochera", layout="centered", page_icon="🅿️")
+
+# Inicializar Memoria de Sesión para navegación dinámica
+if 'vista_inicio' not in st.session_state:
+    st.session_state.vista_inicio = 'lista'
+if 'vehiculo_detalle' not in st.session_state:
+    st.session_state.vehiculo_detalle = None
 
 # --- CSS para Diseño Móvil de Alta Gama ---
 st.markdown("""
@@ -30,6 +37,15 @@ st.markdown("""
         border-radius: 10px;
         font-weight: 600;
     }
+    /* Estilo para las tarjetas de resumen */
+    .tarjeta-resumen {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border-left: 5px solid #0068c9;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -46,14 +62,12 @@ def conectar_sheets():
     archivo = cliente.open("Vehiculos_App")
     hoja_principal = archivo.sheet1
     
-    # Crea pestaña "Historial" si no existe
     try:
         hoja_hist = archivo.worksheet("Historial")
     except gspread.exceptions.WorksheetNotFound:
         hoja_hist = archivo.add_worksheet(title="Historial", rows="1000", cols="6")
         hoja_hist.append_row(["Fecha", "Placa", "Propietario", "Hora de Ingreso", "Hora de Salida", "Pago"])
         
-    # Crea pestaña "Abonos" (Pagos múltiples) si no existe
     try:
         hoja_abonos = archivo.worksheet("Abonos")
     except gspread.exceptions.WorksheetNotFound:
@@ -83,13 +97,126 @@ if datos:
 else:
     df = pd.DataFrame()
 
-# --- 3. Interfaz de Usuario ---
-tab_control, tab_gestion, tab_pagos, tab_historial = st.tabs(["⏱️ Panel", "⚙️ Gestión", "💰 Pagos Múltiples", "📅 Historial"])
-
 # Configuración de Hora Local Global
 zona_horaria = pytz.timezone('America/Lima') 
 hora_actual = datetime.now(zona_horaria).strftime("%H:%M")
 fecha_actual = datetime.now(zona_horaria).strftime("%d/%m/%Y")
+mes_actual_str = datetime.now(zona_horaria).strftime("%m/%Y")
+
+# --- 3. Interfaz de Usuario ---
+tab_inicio, tab_control, tab_gestion, tab_pagos, tab_historial = st.tabs(["🏠 Inicio", "⏱️ Panel", "⚙️ Gestión", "💰 Pagos", "📅 Historial"])
+
+# ==========================================
+# PESTAÑA 0: INICIO (DASHBOARD Y REPORTE MENSUAL)
+# ==========================================
+with tab_inicio:
+    
+    # VISTA 1: Lista Resumida de Vehículos
+    if st.session_state.vista_inicio == 'lista':
+        st.subheader("📊 Resumen de Clientes")
+        if not df.empty:
+            for idx, row in df.iterrows():
+                # Tarjeta visual para cada cliente
+                st.markdown(f"""
+                <div class="tarjeta-resumen">
+                    <h4 style='margin:0; color:#333;'>👤 {row['Propietario']}</h4>
+                    <p style='margin:0; color:#666;'>🚗 Placa: {row['Placa']} | Estado Hoy: {row['Pago'] if row['Pago'] else 'Sin Ingreso'}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Botón para entrar al detalle
+                if st.button(f"🔍 Ver Reporte Mensual", key=f"btn_rep_{row['Placa']}"):
+                    st.session_state.vehiculo_detalle = row['Placa']
+                    st.session_state.vista_inicio = 'detalle'
+                    st.rerun()
+                st.write("---")
+        else:
+            st.info("No hay vehículos registrados en el sistema.")
+
+    # VISTA 2: Perfil y Reporte Detallado del Vehículo
+    elif st.session_state.vista_inicio == 'detalle':
+        if st.button("⬅️ Volver al Resumen General"):
+            st.session_state.vista_inicio = 'lista'
+            st.session_state.vehiculo_detalle = None
+            st.rerun()
+            
+        placa_det = st.session_state.vehiculo_detalle
+        vehiculo_det = df[df["Placa"].astype(str) == placa_det].iloc[0]
+        
+        st.subheader(f"Reporte: {vehiculo_det['Propietario']} ({placa_det})")
+        
+        # Traer el historial completo para cálculos
+        try:
+            datos_hist_total = hoja_historial.get_all_records()
+            df_hist_total = pd.DataFrame(datos_hist_total) if datos_hist_total else pd.DataFrame()
+        except:
+            df_hist_total = pd.DataFrame()
+
+        # Filtrar solo el historial de este vehículo
+        if not df_hist_total.empty:
+            df_vehiculo = df_hist_total[df_hist_total["Placa"].astype(str) == placa_det]
+        else:
+            df_vehiculo = pd.DataFrame()
+
+        # Generador de Meses
+        opciones_meses = [mes_actual_str]
+        if not df_vehiculo.empty:
+            # Extraer meses únicos del historial de esta persona
+            df_vehiculo["Mes_Anio"] = pd.to_datetime(df_vehiculo["Fecha"], format="%d/%m/%Y", errors="coerce").dt.strftime("%m/%Y")
+            meses_historial = df_vehiculo["Mes_Anio"].dropna().unique().tolist()
+            opciones_meses = sorted(list(set(opciones_meses + meses_historial)), reverse=True)
+            
+        mes_seleccionado = st.selectbox("📅 Selecciona el Mes a Evaluar:", opciones_meses)
+        
+        st.write("---")
+        st.write("**Detalle Diario de Asistencia y Pagos:**")
+        
+        # Lógica para construir el reporte del mes
+        mes, anio = mes_seleccionado.split("/")
+        dias_del_mes = calendar.monthrange(int(anio), int(mes))[1]
+        
+        # Si el mes seleccionado es el actual, evaluamos solo hasta el día de hoy para no mostrar "No vino" en el futuro
+        hoy_dt = datetime.now(zona_horaria)
+        if int(mes) == hoy_dt.month and int(anio) == hoy_dt.year:
+            limite_dias = hoy_dt.day
+        else:
+            limite_dias = dias_del_mes
+            
+        reporte_mensual = []
+        pagados = 0
+        deudas = 0
+        faltas = 0
+        
+        for dia in range(1, limite_dias + 1):
+            fecha_str = f"{dia:02d}/{mes}/{anio}"
+            
+            # Buscar si hay registro de esta fecha en el historial del vehículo
+            if not df_vehiculo.empty:
+                registro_dia = df_vehiculo[df_vehiculo["Fecha"] == fecha_str]
+            else:
+                registro_dia = pd.DataFrame()
+                
+            if not registro_dia.empty:
+                # Tomamos el último registro de ese día por si entró varias veces
+                estado_pago = registro_dia.iloc[-1]["Pago"]
+                reporte_mensual.append({"Fecha": fecha_str, "Asistencia": "Vino 🚗", "Estado": estado_pago})
+                if "Pagado" in estado_pago:
+                    pagados += 1
+                else:
+                    deudas += 1
+            else:
+                reporte_mensual.append({"Fecha": fecha_str, "Asistencia": "No vino ⚪", "Estado": "-"})
+                faltas += 1
+                
+        # Mostrar las métricas del mes en tarjetas
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("✅ Días Pagados", pagados)
+        col_m2.metric("❌ Deudas/Pendientes", deudas)
+        col_m3.metric("⚪ Días que No Vino", faltas)
+        
+        # Mostrar tabla detallada del mes
+        st.dataframe(pd.DataFrame(reporte_mensual), use_container_width=True, hide_index=True)
+
 
 # ==========================================
 # PESTAÑA 1: PANEL DE ASISTENCIA Y COBROS
@@ -98,12 +225,10 @@ with tab_control:
     st.subheader("Control en Vivo")
     
     if not df.empty:
-        # Creamos una columna combinada para buscar de manera amigable por Propietario
         df['Buscar_Propietario'] = df["Propietario"].astype(str) + " — " + df["Placa"].astype(str)
         lista_propietarios = df["Buscar_Propietario"].tolist()
         
         propietario_sel = st.selectbox("🔍 Selecciona un Propietario:", lista_propietarios, key="panel_propietario")
-        
         vehiculos_filtrados = df[df["Buscar_Propietario"] == propietario_sel]
         
         if not vehiculos_filtrados.empty:
@@ -134,178 +259,21 @@ with tab_control:
                     hoja_datos.update_cell(fila_idx, 5, "")
                     hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], hora_actual, "", "Pendiente 🔴"])
-                    st.success(f"✅ Ingreso actualizado y guardado en Historial.")
-                    time.sleep(1.5)
+                    st.success(f"✅ Ingreso actualizado.")
+                    time.sleep(1)
                     st.rerun()
                     
             with col2:
                 if st.button("🔴 Salida", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 5, hora_actual)
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], hora_actual, vehiculo['Pago']])
-                    st.success(f"✅ Salida actualizada y guardada en Historial.")
-                    time.sleep(1.5)
+                    st.success(f"✅ Salida actualizada.")
+                    time.sleep(1)
                     st.rerun()
                     
             with col3:
                 if st.button("💵 Pagó", type="primary", use_container_width=True):
                     hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
-                    st.success("✅ Pago registrado y guardado en Historial.")
-                    time.sleep(1.5)
-                    st.rerun()
-                    
-            with col4:
-                if st.button("❌ No Pagó", use_container_width=True):
-                    hoja_datos.update_cell(fila_idx, 6, "No Pagó ❌")
-                    hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
-                    st.error("❌ Deuda registrada y guardada en Historial.")
-                    time.sleep(1.5)
-                    st.rerun()
-                    
-        else:
-            st.warning("⚠️ No tiene resultados en la búsqueda.")
-
-    else:
-        st.warning("Agrega un vehículo en la pestaña 'Gestión'.")
-
-# ==========================================
-# PESTAÑA 2: GESTIÓN (AGREGAR / ELIMINAR)
-# ==========================================
-with tab_gestion:
-    st.subheader("Registrar Nuevo")
-    with st.form("form_nuevo", clear_on_submit=True):
-        n_placa = st.text_input("Placa:").strip()
-        n_prop = st.text_input("Propietario:").strip()
-        if st.form_submit_button("Guardar Vehículo ➕"):
-            if n_placa and n_prop:
-                if not df.empty and n_placa.lower() in df["Placa"].astype(str).str.lower().values:
-                    st.error("⚠️ La placa ya existe.")
-                else:
-                    nuevo_n = len(datos) + 1 if datos else 1
-                    hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente 🔴"])
-                    st.success("✅ Vehículo guardado.")
+                    st.success("✅ Pago registrado.")
                     time.sleep(1)
-                    st.rerun()
-            else:
-                st.warning("Completa los datos.")
-                
-    st.write("---")
-    st.subheader("Eliminar Registro")
-    if not df.empty:
-        df['Buscar_Propietario'] = df["Propietario"].astype(str) + " — " + df["Placa"].astype(str)
-        prop_eliminar = st.selectbox("Seleccionar Propietario para Borrar:", df["Buscar_Propietario"].tolist())
-        if st.button("Eliminar Vehículo 🗑️"):
-            f_idx = df.index[df['Buscar_Propietario'] == prop_eliminar].tolist()[0] + 2
-            hoja_datos.delete_rows(f_idx)
-            st.success("Vehículo eliminado correctamente.")
-            time.sleep(1)
-            st.rerun()
-
-# ==========================================
-# PESTAÑA 3: PAGOS MÚLTIPLES (POR DÍAS/SEMANAS)
-# ==========================================
-with tab_pagos:
-    st.subheader("Registrar Abonos Adelantados o Atrasados")
-    
-    if not df.empty:
-        df['Buscar_Propietario'] = df["Propietario"].astype(str) + " — " + df["Placa"].astype(str)
-        
-        with st.form("form_pagos", clear_on_submit=True):
-            propietario_pago_sel = st.selectbox("👤 Propietario:", df["Buscar_Propietario"].tolist())
-            
-            st.write("📅 **Selecciona los días a pagar:**")
-            fechas_pago = st.date_input("Haz clic para elegir Inicio y Fin (o un solo día):", value=[], format="DD/MM/YYYY")
-            
-            monto = st.number_input("💰 Monto Pagado:", min_value=0.0, step=1.0, format="%.2f")
-            
-            if st.form_submit_button("Registrar Pago Múltiple 💵"):
-                descripcion_generada = ""
-                
-                if isinstance(fechas_pago, tuple) or isinstance(fechas_pago, list):
-                    if len(fechas_pago) == 2:
-                        dias_total = (fechas_pago[1] - fechas_pago[0]).days + 1
-                        descripcion_generada = f"Del {fechas_pago[0].strftime('%d/%m/%Y')} al {fechas_pago[1].strftime('%d/%m/%Y')} ({dias_total} días)"
-                    elif len(fechas_pago) == 1:
-                        descripcion_generada = f"Día: {fechas_pago[0].strftime('%d/%m/%Y')}"
-                elif fechas_pago:
-                    descripcion_generada = f"Día: {fechas_pago.strftime('%d/%m/%Y')}"
-
-                if descripcion_generada and monto > 0:
-                    vehiculo_sel = df[df["Buscar_Propietario"] == propietario_pago_sel].iloc[0]
-                    hoja_abonos.append_row([fecha_actual, vehiculo_sel["Placa"], vehiculo_sel["Propietario"], descripcion_generada, monto])
-                    st.success(f"✅ Pago de S/{monto} registrado a {vehiculo_sel['Propietario']}.")
-                    time.sleep(1.5)
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Debes seleccionar al menos una fecha y un monto mayor a 0.")
-                    
-        st.write("---")
-        st.subheader("Eliminar Pagos Múltiples")
-        
-        try:
-            datos_abonos = hoja_abonos.get_all_records()
-        except Exception:
-            datos_abonos = []
-            
-        if datos_abonos:
-            df_abonos = pd.DataFrame(datos_abonos)
-            st.dataframe(df_abonos, use_container_width=True)
-            
-            lista_opciones_abono = [f"Fila {idx + 2} | {row['Fecha']} - {row['Propietario']} ({row['Placa']}) - S/{row['Monto Pagado']}" for idx, row in df_abonos.iterrows()]
-            
-            abono_a_eliminar = st.selectbox("Selecciona el pago que deseas anular:", lista_opciones_abono)
-            
-            if st.button("❌ Eliminar Este Pago"):
-                fila_abono_idx = int(abono_a_eliminar.split("|")[0].replace("Fila", "").strip())
-                hoja_abonos.delete_rows(fila_abono_idx)
-                st.success("✅ Pago eliminado correctamente de la base de datos.")
-                time.sleep(1.5)
-                st.rerun()
-        else:
-            st.info("No hay pagos múltiples registrados todavía.")
-    else:
-        st.warning("Agrega vehículos en 'Gestión' primero.")
-
-# ==========================================
-# PESTAÑA 4: HISTORIAL MULTI-FILTRO (DIARIO)
-# ==========================================
-with tab_historial:
-    st.subheader("📅 Historial Diario")
-    
-    try:
-        datos_historial = hoja_historial.get_all_records()
-    except Exception:
-        datos_historial = []
-    
-    if datos_historial:
-        df_hist = pd.DataFrame(datos_historial)
-        
-        fechas_unicas = ["Todas"] + df_hist["Fecha"].astype(str).unique().tolist()
-        propietarios_unicos = ["Todas"] + df_hist["Propietario"].astype(str).unique().tolist()
-        
-        col_filtro1, col_filtro2 = st.columns(2)
-        
-        with col_filtro1:
-            fecha_seleccionada = st.selectbox("📅 Filtrar por Fecha:", fechas_unicas)
-            
-        with col_filtro2:
-            prop_seleccionado_hist = st.selectbox("👤 Filtrar por Propietario:", propietarios_unicos, key="hist_prop")
-            
-        st.write("---")
-        
-        df_mostrar = df_hist.copy() 
-        
-        if fecha_seleccionada != "Todas":
-            df_mostrar = df_mostrar[df_mostrar["Fecha"].astype(str) == fecha_seleccionada]
-            
-        if prop_seleccionado_hist != "Todas":
-            df_mostrar = df_mostrar[df_mostrar["Propietario"].astype(str) == prop_seleccionado_hist]
-            
-        if not df_mostrar.empty:
-            st.success(f"✅ Mostrando {len(df_mostrar)} resultados encontrados.")
-            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
-        else:
-            st.warning("⚠️ No tiene resultados en la búsqueda.")
-            
-    else:
-        st.info("Aún no has archivado ningún registro diario.")
