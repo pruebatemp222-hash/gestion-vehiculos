@@ -90,16 +90,20 @@ except Exception:
 
 if datos:
     df = pd.DataFrame(datos)
-    for col in ["Hora de Ingreso", "Hora de Salida", "Pago"]:
+    # Agregamos soporte para la columna 'Tipo' de forma retrocompatible
+    for col in ["Hora de Ingreso", "Hora de Salida", "Pago", "Tipo"]:
         if col not in df.columns:
             df[col] = ""
     df.fillna("", inplace=True)
     
-    # Limpieza automática de espacios invisibles para evitar IndexErrors
+    # Limpieza automática de espacios invisibles
     if "Placa" in df.columns:
         df["Placa"] = df["Placa"].astype(str).str.strip()
     if "Propietario" in df.columns:
         df["Propietario"] = df["Propietario"].astype(str).str.strip()
+        
+    # Si la columna Tipo está vacía para registros antiguos, asumimos que es Auto
+    df["Tipo"] = df["Tipo"].replace("", "Auto")
 else:
     df = pd.DataFrame()
 
@@ -122,7 +126,7 @@ with tab_inicio:
             for idx, row in df.iterrows():
                 st.markdown(f"""
                 <div class="tarjeta-resumen">
-                    <h4 style='margin:0; color:#333;'>👤 {row['Propietario']}</h4>
+                    <h4 style='margin:0; color:#333;'>👤 {row['Propietario']} <span style='font-size:12px; color:#777;'>({row['Tipo']})</span></h4>
                     <p style='margin:0; color:#666;'>🚗 Placa: {row['Placa']} | Estado Hoy: {row['Pago'] if row['Pago'] else 'Sin Ingreso'}</p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -141,7 +145,6 @@ with tab_inicio:
             st.session_state.vehiculo_detalle = None
             st.rerun()
             
-        # Control estricto contra IndexErrors y espacios huérfanos
         placa_det = str(st.session_state.vehiculo_detalle).strip()
         filtro_vehiculo = df[df["Placa"] == placa_det] if not df.empty else pd.DataFrame()
         
@@ -253,7 +256,7 @@ with tab_inicio:
                 st.info("Aún no hay datos para graficar este mes.")
 
 # ==========================================
-# PESTAÑA 1: PANEL DE ASISTENCIA (SINCRONIZADO)
+# PESTAÑA 1: PANEL DE ASISTENCIA (CON INTELIGENCIA DE COSTOS PARA MOTOS)
 # ==========================================
 with tab_control:
     st.subheader("Control en Vivo")
@@ -268,10 +271,35 @@ with tab_control:
         if not vehiculos_filtrados.empty:
             vehiculo = vehiculos_filtrados.iloc[0]
             placa_sel = vehiculo['Placa']
+            tipo_v = vehiculo.get("Tipo", "Auto")
             fila_idx = df.index[df['Buscar_Propietario'] == propietario_sel].tolist()[0] + 2
             
-            st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel}")
+            st.info(f"👤 **Propietario:** {vehiculo['Propietario']} | 🚗 **Placa:** {placa_sel} | 📂 **Tipo:** {tipo_v}")
             
+            # --- CEREBRO: LÓGICA DE TARIFAS DE MOTO ---
+            tarifa_moto = 3
+            tiene_recargo = False
+            ultima_salida_hora = ""
+            
+            if tipo_v == "Moto":
+                try:
+                    datos_h = hoja_historial.get_all_records()
+                    df_h = pd.DataFrame(datos_h) if datos_h else pd.DataFrame()
+                    if not df_h.empty:
+                        df_h['Placa'] = df_h['Placa'].astype(str).str.strip()
+                        df_h['Hora de Salida'] = df_h['Hora de Salida'].astype(str).str.strip()
+                        
+                        # Buscamos registros históricos de esta moto que tengan una Salida válida ya guardada
+                        df_moto_hist = df_h[(df_h['Placa'] == str(placa_sel).strip()) & (df_h['Hora de Salida'] != "")]
+                        if not df_moto_hist.empty:
+                            ultima_salida_hora = df_moto_hist.iloc[-1]['Hora de Salida']
+                            # Si tiene formato correcto HH:MM y pasa de las 12:00
+                            if len(ultima_salida_hora) == 5 and ":" in ultima_salida_hora and ultima_salida_hora > "12:00":
+                                tarifa_moto = 4
+                                tiene_recargo = True
+                except:
+                    pass
+
             col_m1, col_m2, col_m3 = st.columns(3)
             col_m1.metric("Ingreso", vehiculo["Hora de Ingreso"] if vehiculo["Hora de Ingreso"] else "--:--")
             col_m2.metric("Salida", vehiculo["Hora de Salida"] if vehiculo["Hora de Salida"] else "--:--")
@@ -279,13 +307,36 @@ with tab_control:
             
             st.write("---")
             
-            if vehiculo["Hora de Ingreso"] != "" and vehiculo["Pago"] == "Pendiente 🔴":
+            # --- VISUALIZACIÓN EN VIVO DE CUÁNTO DEBE (SOLO PARA MOTOS) ---
+            if tipo_v == "Moto":
+                if tiene_recargo:
+                    st.markdown(f"""
+                    <div style="background-color: #fff3cd; padding: 15px; border-radius: 12px; border-left: 5px solid #ffc107; margin-bottom: 15px;">
+                        <h4 style="margin:0; color: #856404; font-size:16px;">🛵 Control de Tarifa (Moto Lineal)</h4>
+                        <p style="margin:5px 0 0 0; font-size:16px; color:#333;"><b>Monto a pagar hoy: <span style="color:#dc3545; font-size:22px;">S/. 4.00</span></b></p>
+                        <p style="margin:4px 0 0 0; font-size:13px; color: #666;">⚠️ Se aplica <b>S/. 1.00 de recargo</b> porque en su última visita retiró la moto a las <b>{ultima_salida_hora}</b> (pasado el mediodía).</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style="background-color: #d4edda; padding: 15px; border-radius: 12px; border-left: 5px solid #28a745; margin-bottom: 15px;">
+                        <h4 style="margin:0; color: #155724; font-size:16px;">🛵 Control de Tarifa (Moto Lineal)</h4>
+                        <p style="margin:5px 0 0 0; font-size:16px; color:#333;"><b>Monto a pagar hoy: <span style="color:#28a745; font-size:22px;">S/. 3.00</span></b></p>
+                        <p style="margin:4px 0 0 0; font-size:13px; color: #555;">✅ Tarifa regular aplicada. Salió a tiempo en su última visita (o es nuevo).</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            if vehiculo["Hora de Ingreso"] != "" and "Pendiente" in str(vehiculo["Pago"]):
                 st.warning("⚠️ RECORDATORIO: Este vehículo aún tiene un PAGO PENDIENTE.")
-            elif vehiculo["Pago"] == "No Pagó ❌":
+            elif "No Pagó" in str(vehiculo["Pago"]):
                 st.error("🚨 ALERTA: Este vehículo registra una DEUDA de su visita.")
             
             col1, col2 = st.columns(2)
             col3, col4 = st.columns(2)
+            
+            # Dinamizamos los textos de guardado para las motos
+            texto_pago_guardar = f"Pagado (S/. {tarifa_moto}) ✅" if tipo_v == "Moto" else "Pagado ✅"
+            texto_deuda_guardar = f"No Pagó (S/. {tarifa_moto}) ❌" if tipo_v == "Moto" else "No Pagó ❌"
             
             with col1:
                 if st.button("🟢 Ingreso", use_container_width=True):
@@ -293,7 +344,6 @@ with tab_control:
                     hoja_datos.update_cell(fila_idx, 5, "")
                     hoja_datos.update_cell(fila_idx, 6, "Pendiente 🔴")
                     
-                    # Crea registro nuevo únicamente al marcar Ingreso
                     hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], hora_actual, "", "Pendiente 🔴"])
                     
                     st.success(f"✅ Ingreso actualizado.")
@@ -327,7 +377,7 @@ with tab_control:
                     
             with col3:
                 if st.button("💵 Pagó", type="primary", use_container_width=True):
-                    hoja_datos.update_cell(fila_idx, 6, "Pagado ✅")
+                    hoja_datos.update_cell(fila_idx, 6, texto_pago_guardar)
                     
                     try:
                         datos_h = hoja_historial.get_all_records()
@@ -339,20 +389,20 @@ with tab_control:
                             
                             if not df_h[filtro].empty:
                                 last_idx = df_h.index[filtro].tolist()[-1] + 2
-                                hoja_historial.update_cell(last_idx, 6, "Pagado ✅")
+                                hoja_historial.update_cell(last_idx, 6, texto_pago_guardar)
                             else:
-                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
+                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], texto_pago_guardar])
                         else:
-                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "Pagado ✅"])
+                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], texto_pago_guardar])
                     except: pass
                     
-                    st.success("✅ Pago registrado.")
+                    st.success("✅ Pago registrado con éxito.")
                     time.sleep(1)
                     st.rerun()
                     
             with col4:
                 if st.button("❌ No Pagó", use_container_width=True):
-                    hoja_datos.update_cell(fila_idx, 6, "No Pagó ❌")
+                    hoja_datos.update_cell(fila_idx, 6, texto_deuda_guardar)
                     
                     try:
                         datos_h = hoja_historial.get_all_records()
@@ -364,11 +414,11 @@ with tab_control:
                             
                             if not df_h[filtro].empty:
                                 last_idx = df_h.index[filtro].tolist()[-1] + 2
-                                hoja_historial.update_cell(last_idx, 6, "No Pagó ❌")
+                                hoja_historial.update_cell(last_idx, 6, texto_deuda_guardar)
                             else:
-                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
+                                hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], texto_deuda_guardar])
                         else:
-                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], "No Pagó ❌"])
+                            hoja_historial.append_row([fecha_actual, placa_sel, vehiculo['Propietario'], vehiculo['Hora de Ingreso'], vehiculo['Hora de Salida'], texto_deuda_guardar])
                     except: pass
                     
                     st.error("❌ Deuda registrada.")
@@ -380,20 +430,23 @@ with tab_control:
         st.warning("Agrega un vehículo en 'Gestión'.")
 
 # ==========================================
-# PESTAÑA 2: GESTIÓN (AGREGAR / ELIMINAR)
+# PESTAÑA 2: GESTIÓN (AGREGAR CON SELECCIÓN DE TIPO / ELIMINAR)
 # ==========================================
 with tab_gestion:
-    st.subheader("Registrar Nuevo")
+    st.subheader("Registrar Nuevo Vehículo")
     with st.form("form_nuevo", clear_on_submit=True):
         n_placa = st.text_input("Placa:").strip()
         n_prop = st.text_input("Propietario:").strip()
+        n_tipo = st.selectbox("Tipo de Vehículo:", ["Auto", "Moto"]) # Selector añadido para la regla
+        
         if st.form_submit_button("Guardar Vehículo ➕"):
             if n_placa and n_prop:
                 if not df.empty and n_placa.lower() in df["Placa"].astype(str).str.lower().values:
                     st.error("⚠️ La placa ya existe.")
                 else:
                     nuevo_n = len(datos) + 1 if datos else 1
-                    hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente 🔴"])
+                    # Añade el registro incluyendo la columna 'Tipo' al final de la fila
+                    hoja_datos.append_row([nuevo_n, n_placa, n_prop, "", "", "Pendiente 🔴", n_tipo])
                     st.success("✅ Vehículo guardado.")
                     time.sleep(1)
                     st.rerun()
@@ -477,7 +530,7 @@ with tab_historial:
     if datos_historial:
         df_hist = pd.DataFrame(datos_historial)
         
-        # Limpieza de espacios en filtros del historial para máxima estabilidad
+        # Limpieza de filtros
         for c in ["Fecha", "Placa", "Propietario"]:
             if c in df_hist.columns:
                 df_hist[c] = df_hist[c].astype(str).str.strip()
